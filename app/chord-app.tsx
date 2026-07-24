@@ -10,14 +10,14 @@ import {
   isPracticeMatch,
   matchesChordSearch,
   midiNoteName,
+  randomPracticeVoicing,
   type AccidentalPreference,
   type Chord,
 } from "@/lib/music";
 
-type Page = "Library" | "Favorites" | "Builder" | "Practice" | "Progressions" | "Settings";
+type Page = "Library" | "Chord" | "Favorites" | "Builder" | "Practice" | "Progressions" | "Settings";
 type ChordView = "In Scale" | "Neighbor Keys";
-type PracticeMode = "Chord Learning" | "Exact Voicing";
-type PracticeOrder = "Random" | "Sequential";
+type PracticeMode = "Chord Learning" | "Exact Voicing" | "Hear";
 type PracticeSource = "scale" | "favorites";
 
 type AuthUser = {
@@ -77,12 +77,24 @@ const DEFAULT_STATE: PersistedState = {
 
 const NAV_ITEMS: Array<{ page: Page; key: string }> = [
   { page: "Library", key: "01" },
-  { page: "Favorites", key: "02" },
-  { page: "Builder", key: "03" },
-  { page: "Practice", key: "04" },
-  { page: "Progressions", key: "05" },
-  { page: "Settings", key: "06" },
+  { page: "Chord", key: "02" },
+  { page: "Favorites", key: "03" },
+  { page: "Builder", key: "04" },
+  { page: "Practice", key: "05" },
+  { page: "Progressions", key: "06" },
+  { page: "Settings", key: "07" },
 ];
+
+const DEGREE_ORDER = ["I", "II", "III", "IV", "V", "VI", "VII"];
+
+function shuffled<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+}
 
 function snapshotFor(chord: Chord, notes = chord.voicing, name = "System Default"): Snapshot {
   return {
@@ -198,7 +210,7 @@ export default function ChordApp() {
   const [view, setView] = useState<ChordView>("In Scale");
   const [family, setFamily] = useState("All Families");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState("Learning Order");
+  const [expandedDegrees, setExpandedDegrees] = useState<string[]>([]);
   const [selectedChord, setSelectedChord] = useState<Chord | null>(null);
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
   const [selectedNotes, setSelectedNotes] = useState<number[]>([]);
@@ -207,15 +219,16 @@ export default function ChordApp() {
   const [loop, setLoop] = useState(false);
   const [midiState, setMidiState] = useState("Not connected");
   const [practiceMode, setPracticeMode] = useState<PracticeMode>("Chord Learning");
-  const [practiceOrder, setPracticeOrder] = useState<PracticeOrder>("Random");
   const [practiceSource, setPracticeSource] = useState<PracticeSource>("scale");
+  const [practiceCount, setPracticeCount] = useState(10);
+  const [hearNoteCount, setHearNoteCount] = useState(3);
   const [hints, setHints] = useState(true);
   const [practiceItems, setPracticeItems] = useState<Snapshot[]>([]);
   const [practiceIndex, setPracticeIndex] = useState(0);
   const [practiceSuccess, setPracticeSuccess] = useState(0);
   const [practiceErrors, setPracticeErrors] = useState(0);
+  const [practiceSkipped, setPracticeSkipped] = useState(0);
   const [practiceComplete, setPracticeComplete] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(36);
   const saveFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -271,22 +284,23 @@ export default function ChordApp() {
     const result = allChords.filter(
       (chord) => (family === "All Families" || chord.family === family) && matchesChordSearch(chord, query),
     );
-    if (sort === "Learning Order") {
-      const degrees = ["I", "II", "III", "IV", "V", "VI", "VII"];
-      return [...result].sort(
-        (a, b) =>
-          a.complexity - b.complexity ||
-          a.voicing.length - b.voicing.length ||
-          degrees.indexOf(a.degree) - degrees.indexOf(b.degree) ||
-          a.symbol.localeCompare(b.symbol),
-      );
-    }
-    if (sort === "Name") return [...result].sort((a, b) => a.symbol.localeCompare(b.symbol));
-    if (sort === "Complexity") return [...result].sort((a, b) => a.complexity - b.complexity || a.symbol.localeCompare(b.symbol));
-    return result;
-  }, [allChords, family, query, sort]);
+    return [...result].sort(
+      (a, b) =>
+        DEGREE_ORDER.indexOf(a.degree) - DEGREE_ORDER.indexOf(b.degree) ||
+        a.complexity - b.complexity ||
+        a.voicing.length - b.voicing.length ||
+        a.symbol.localeCompare(b.symbol),
+    );
+  }, [allChords, family, query]);
 
-  const displayedChords = filteredChords.slice(0, visibleCount);
+  const chordGroups = useMemo(
+    () =>
+      DEGREE_ORDER.map((degree) => ({
+        degree,
+        chords: filteredChords.filter((chord) => chord.degree === degree),
+      })).filter((group) => group.chords.length),
+    [filteredChords],
+  );
   const userVoicings = selectedChord
     ? stored.voicings.filter((voicing) => voicing.chordId === selectedChord.id)
     : [];
@@ -320,6 +334,12 @@ export default function ChordApp() {
     window.setTimeout(() => setActiveNotes([]), 1500);
   }
 
+  function openChord(chord: Chord) {
+    setSelectedChord(chord);
+    setSelectedNotes(chord.voicing);
+    setPage("Chord");
+  }
+
   function toggleFavorite(chord: Chord, notes = chord.voicing, name = "System Default") {
     const existing = stored.favorites.find(
       (favorite) => favorite.chordId === chord.id && favorite.name === name && favorite.notes.join(",") === notes.join(","),
@@ -337,22 +357,21 @@ export default function ChordApp() {
     setStatus(`${chord.symbol} added to Builder`);
   }
 
-  function saveVoicing() {
-    if (!selectedChord) return;
-    if (selectedNotes.length < 2 || selectedNotes.length > 16 || selectedNotes.some((note) => note < 21 || note > 108)) {
+  function saveVoicingFor(chordId: string, chordSymbol: string, chordPitchClasses: number[], notes: number[]) {
+    if (notes.length < 2 || notes.length > 16 || notes.some((note) => note < 21 || note > 108)) {
       setStatus("Choose 2–16 notes within A0–C8.");
       return;
     }
-    const foreign = selectedNotes.filter((note) => !selectedChord.pitchClasses.includes(note % 12));
+    const foreign = notes.filter((note) => !chordPitchClasses.includes(note % 12));
     const warning = foreign.length ? `Foreign notes: ${foreign.map((note) => midiNoteName(note, stored.preference)).join(", ")}` : "";
     if (warning && !window.confirm(`${warning}. Save anyway?`)) return;
-    const nextNumber = stored.voicings.filter((voicing) => voicing.chordId === selectedChord.id).length + 1;
+    const nextNumber = stored.voicings.filter((voicing) => voicing.chordId === chordId).length + 1;
     const voicing: Voicing = {
       id: crypto.randomUUID(),
-      chordId: selectedChord.id,
-      chordSymbol: selectedChord.symbol,
+      chordId,
+      chordSymbol,
       name: `Voicing ${nextNumber}`,
-      notes: [...selectedNotes].sort((a, b) => a - b),
+      notes: [...notes].sort((a, b) => a - b),
       explicitDefault: false,
       createdAt: new Date().toISOString(),
     };
@@ -360,24 +379,69 @@ export default function ChordApp() {
     setStatus(`${voicing.name} saved`);
   }
 
+  function saveVoicing() {
+    if (!selectedChord) return;
+    saveVoicingFor(selectedChord.id, selectedChord.symbol, selectedChord.pitchClasses, selectedNotes);
+  }
+
   function startPractice(source: PracticeSource = practiceSource) {
-    const available =
+    let available =
       source === "favorites"
         ? stored.favorites
         : buildChords(stored.key, stored.mode, stored.preference, "In Scale").map((chord) => snapshotFor(chord));
-    const ordered =
-      practiceOrder === "Random"
-        ? [...available].sort(() => Math.random() - 0.5)
-        : available;
-    const sourceItems = ordered.slice(0, Math.min(10, ordered.length));
+    const chordCatalog = buildChords(stored.key, stored.mode, stored.preference, "All Chords");
+    const tonesFor = (item: Snapshot) =>
+      chordCatalog.find((chord) => chord.id === item.chordId)?.pitchClasses
+      ?? [...new Set(item.notes.map((note) => note % 12))];
+    if (practiceMode === "Hear") {
+      available = available.filter((item) => {
+        const toneCount = tonesFor(item).length;
+        return toneCount <= hearNoteCount && hearNoteCount <= toneCount * 3;
+      });
+    }
+    if (!available.length) {
+      setStatus("No chords match this practice setup.");
+      return;
+    }
+
+    const requestedCount = Math.max(1, Math.min(50, Math.floor(practiceCount)));
+    const sourceItems: Snapshot[] = [];
+    while (sourceItems.length < requestedCount) {
+      const batch = shuffled(available);
+      for (const item of batch) {
+        if (sourceItems.length >= requestedCount) break;
+        const notes = practiceMode === "Hear"
+          ? randomPracticeVoicing(tonesFor(item), hearNoteCount)
+          : [...item.notes];
+        sourceItems.push({
+          ...item,
+          id: crypto.randomUUID(),
+          name: practiceMode === "Hear" ? `Hear · ${hearNoteCount} notes` : item.name,
+          notes,
+        });
+      }
+    }
     setPracticeSource(source);
     setPracticeItems(sourceItems);
     setPracticeIndex(0);
     setPracticeSuccess(0);
     setPracticeErrors(0);
+    setPracticeSkipped(0);
     setPracticeComplete(false);
     setSelectedNotes([]);
-    if (sourceItems.length) setStatus(`Practice started with ${sourceItems.length} ${practiceOrder.toLowerCase()} items`);
+    setStatus(`Practice started with ${sourceItems.length} random chords`);
+  }
+
+  function advancePractice(skipped = false) {
+    if (skipped) setPracticeSkipped((count) => count + 1);
+    setPracticeSuccess(0);
+    setSelectedNotes([]);
+    if (practiceIndex + 1 >= practiceItems.length) {
+      setPracticeComplete(true);
+    } else {
+      setPracticeIndex((index) => index + 1);
+      setStatus(skipped ? "Chord skipped" : "Next chord");
+    }
   }
 
   function returnToPracticeSetup() {
@@ -385,6 +449,7 @@ export default function ChordApp() {
     setPracticeIndex(0);
     setPracticeSuccess(0);
     setPracticeErrors(0);
+    setPracticeSkipped(0);
     setPracticeComplete(false);
     setSelectedNotes([]);
     setStatus("Practice setup");
@@ -393,7 +458,8 @@ export default function ChordApp() {
   useEffect(() => {
     if (page !== "Practice" || !currentPracticeTarget || practiceComplete || selectedNotes.length === 0) return;
     const timer = window.setTimeout(() => {
-      if (isPracticeMatch(selectedNotes, currentPracticeTarget.notes, practiceMode)) {
+      const matchMode = practiceMode === "Chord Learning" ? "Chord Learning" : "Exact Voicing";
+      if (isPracticeMatch(selectedNotes, currentPracticeTarget.notes, matchMode)) {
         setStatus("Correct — release all notes");
         if (practiceSuccess + 1 >= 3) {
           if (practiceIndex + 1 >= practiceItems.length) {
@@ -414,6 +480,12 @@ export default function ChordApp() {
     return () => window.clearTimeout(timer);
   }, [selectedNotes, currentPracticeTarget, practiceComplete, practiceMode, page, practiceIndex, practiceItems.length, practiceSuccess]);
 
+  useEffect(() => {
+    if (page !== "Practice" || practiceMode !== "Hear" || !currentPracticeTarget || practiceComplete) return;
+    const timer = window.setTimeout(() => playNotes(currentPracticeTarget.notes), 250);
+    return () => window.clearTimeout(timer);
+  }, [currentPracticeTarget, page, practiceComplete, practiceMode]);
+
   async function connectMidi() {
     const midiNavigator = navigator as Navigator & {
       requestMIDIAccess?: () => Promise<{
@@ -432,6 +504,7 @@ export default function ChordApp() {
         return;
       }
       input.onmidimessage = (event) => {
+        if (!event.data) return;
         const [command, note, velocity] = event.data;
         const isNoteOn = (command & 0xf0) === 0x90 && velocity > 0;
         const isNoteOff = (command & 0xf0) === 0x80 || ((command & 0xf0) === 0x90 && velocity === 0);
@@ -466,7 +539,7 @@ export default function ChordApp() {
     const blob = new Blob([JSON.stringify({ schemaVersion: 1, ...stored }, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "harmonic-practice-data.json";
+    link.download = "chorda-data.json";
     link.click();
     URL.revokeObjectURL(link.href);
   }
@@ -488,20 +561,36 @@ export default function ChordApp() {
     }
   }
 
+  function renderChordCard(chord: Chord) {
+    const favorite = stored.favorites.some((item) => item.chordId === chord.id && item.name === "System Default");
+    return (
+      <article className={`chord-card ${selectedChord?.id === chord.id ? "selected" : ""}`} key={chord.id}>
+        <button
+          className="card-main"
+          onClick={(event) => {
+            if (event.detail === 1) audition(chord);
+          }}
+          onDoubleClick={() => openChord(chord)}
+          aria-label={`Play ${chord.symbol}; double click for chord details`}
+        >
+          <h2>{chord.symbol}</h2>
+          <p className="notes">{chord.notes.join(" · ")}</p>
+          <span className="card-family">{chord.family}</span>
+        </button>
+        <div className="card-actions">
+          <button title={favorite ? "Remove from Favorites" : "Add to Favorites"} onClick={() => toggleFavorite(chord)}>
+            {favorite ? "♥ Saved" : "♡ Save"}
+          </button>
+          <button title="Add to Builder" onClick={() => addToBuilder(chord)}>＋ Builder</button>
+        </div>
+      </article>
+    );
+  }
+
   function renderLibrary() {
     return (
       <>
-        <section className="page-heading">
-          <div>
-            <p className="eyebrow">Chord discovery</p>
-            <h1>Chord Library</h1>
-          </div>
-          <div className="heading-stat">
-            <span>{filteredChords.length}</span>
-            <small>matching chords</small>
-          </div>
-        </section>
-
+        <PageHeading eyebrow="Chord discovery" title="Chord Library" count={filteredChords.length} label="chords" />
         <section className="library-toolbar" aria-label="Chord filters">
           <div className="segmented">
             {(["In Scale", "Neighbor Keys"] as ChordView[]).map((item) => (
@@ -522,119 +611,104 @@ export default function ChordApp() {
               ))}
             </select>
           </label>
-          <label>
-            <span>Sort</span>
-            <select value={sort} onChange={(event) => setSort(event.target.value)}>
-              <option>Learning Order</option>
-              <option>Degree</option>
-              <option>Name</option>
-              <option>Complexity</option>
-            </select>
-          </label>
         </section>
-        <p className="view-explanation">
-          {view === "In Scale"
-            ? `Every displayed chord uses only notes from ${stored.key} ${stored.mode}.`
-            : `Optional discoveries from the two neighboring keys on the circle of fifths, clearly labeled by source.`}
-        </p>
 
-        {query && displayedChords.length === 0 ? (
-          <EmptyState title="No matching chord symbol" body="Try another root, family, or accidental spelling." />
+        {!chordGroups.length ? (
+          <EmptyState title="No matching chords" body="Change the search or family filter." />
         ) : (
-          <section className="chord-grid" aria-label="Chord results">
-            {displayedChords.map((chord) => {
-              const favorite = stored.favorites.some((item) => item.chordId === chord.id && item.name === "System Default");
-              const count = stored.voicings.filter((voicing) => voicing.chordId === chord.id).length;
+          <section className="degree-groups" aria-label="Chord results by scale degree">
+            {chordGroups.map(({ degree, chords }) => {
+              const expanded = expandedDegrees.includes(degree) || Boolean(query);
+              const visible = expanded ? chords : chords.slice(0, 4);
+              const roots = [...new Set(chords.map((chord) => chord.root))].join(" · ");
               return (
-                <article className={`chord-card ${selectedChord?.id === chord.id ? "selected" : ""}`} key={chord.id}>
-                  <button className="card-main" onClick={() => audition(chord)} aria-label={`Play ${chord.symbol}`}>
-                    <span className="card-degree">{chord.degree}</span>
-                    <h2>{chord.symbol}</h2>
-                    <p className="notes">{chord.notes.join(" · ")}</p>
-                    <div className="card-meta">
-                      <span>{chord.family}</span>
-                      <span>{chord.voicing.length} notes</span>
-                    </div>
-                    <p className="source-label">{chord.source}</p>
-                  </button>
-                  <div className="card-actions">
-                    <button title={`Play ${chord.symbol}`} onClick={() => audition(chord)}>Play</button>
-                    <button title={favorite ? "Remove from Favorites" : "Add to Favorites"} onClick={() => toggleFavorite(chord)}>
-                      {favorite ? "♥ Saved" : "♡ Save"}
+                <section className="degree-row" key={degree}>
+                  <header>
+                    <div><span>{degree}</span><small>{roots}</small></div>
+                    <button
+                      onClick={() => setExpandedDegrees((degrees) =>
+                        degrees.includes(degree)
+                          ? degrees.filter((item) => item !== degree)
+                          : [...degrees, degree])}
+                      disabled={Boolean(query) || chords.length <= 4}
+                    >
+                      {query ? `Matches · ${chords.length}` : chords.length <= 4 ? "All Shown" : expanded ? "Collapse" : `Show All · ${chords.length}`}
                     </button>
-                    <button title="Add to Builder" onClick={() => addToBuilder(chord)}>＋ Builder</button>
+                  </header>
+                  <div className="degree-chord-grid">
+                    {visible.map(renderChordCard)}
                   </div>
-                  {count > 0 && <span className="voicing-count">{count} personal</span>}
-                </article>
+                </section>
               );
             })}
           </section>
         )}
-        {displayedChords.length < filteredChords.length && (
-          <div className="load-more">
-            <button onClick={() => setVisibleCount((count) => count + 36)}>
-              Load More · {filteredChords.length - displayedChords.length} Remaining
-            </button>
-          </div>
-        )}
+      </>
+    );
+  }
 
-        {selectedChord && (
-          <section className="detail-panel">
-            <div className="detail-title">
-              <div>
-                <p className="eyebrow">Selected chord</p>
-                <h2>{selectedChord.symbol}</h2>
+  function renderChord() {
+    if (!selectedChord) {
+      return (
+        <>
+          <PageHeading eyebrow="Voicing workspace" title="Chord" />
+          <EmptyState title="No chord selected" body="Double-click a chord in the Library." action="Open Library" onAction={() => setPage("Library")} />
+        </>
+      );
+    }
+
+    const favorite = stored.favorites.some((item) => item.chordId === selectedChord.id && item.name === "System Default");
+    return (
+      <>
+        <PageHeading eyebrow={`${selectedChord.degree} · ${selectedChord.family}`} title={selectedChord.symbol} />
+        <section className="chord-page-actions">
+          <button onClick={() => toggleFavorite(selectedChord)}>{favorite ? "♥ Saved" : "♡ Save"}</button>
+          <button onClick={() => addToBuilder(selectedChord)}>＋ Builder</button>
+        </section>
+        <section className="detail-panel chord-workspace">
+          <div className="detail-columns">
+            <div>
+              <h3>System Default</h3>
+              <p className="large-notes">{selectedChord.voicing.map((note) => midiNoteName(note, stored.preference)).join(" · ")}</p>
+              <div className="button-row">
+                <button className="primary-button" onClick={() => audition(selectedChord)}>Play Voicing</button>
+                <button onClick={() => setSelectedNotes(selectedChord.voicing)}>Edit on Piano</button>
               </div>
-              <button className="text-button" onClick={() => setSelectedChord(null)}>Close</button>
             </div>
-            <div className="detail-columns">
-              <div>
-                <h3>System Default</h3>
-                <p className="large-notes">{selectedChord.voicing.map((note) => midiNoteName(note, stored.preference)).join(" · ")}</p>
-                <p>Root position · velocity 90 · 1.5 seconds</p>
-                <div className="button-row">
-                  <button className="primary-button" onClick={() => audition(selectedChord)}>Play Voicing</button>
-                  <button onClick={() => setSelectedNotes(selectedChord.voicing)}>Edit on Piano</button>
-                </div>
+            <div>
+              <h3>Root Note</h3>
+              <div className="bass-options">
+                {selectedChord.pitchClasses.map((pc, index) => (
+                  <button
+                    key={pc}
+                    onClick={() => {
+                      const notes = invertVoicing(selectedChord, pc);
+                      setSelectedNotes(notes);
+                      setActiveNotes(notes);
+                      playNotes(notes);
+                    }}
+                  >
+                    {selectedChord.notes[index]}
+                  </button>
+                ))}
               </div>
-              <div>
-                <h3>Bass Note</h3>
-                <div className="bass-options">
-                  {selectedChord.pitchClasses.map((pc, index) => (
-                    <button
-                      key={pc}
-                      onClick={() => {
-                        const notes = invertVoicing(selectedChord, pc);
-                        setSelectedNotes(notes);
-                        setActiveNotes(notes);
-                        playNotes(notes);
-                      }}
-                    >
-                      {index === 0 ? "Root" : `${selectedChord.notes[index]} bass`}
+            </div>
+            <div>
+              <h3>Personal Voicings</h3>
+              {userVoicings.length > 0 && (
+                <div className="mini-list">
+                  {userVoicings.map((voicing) => (
+                    <button key={voicing.id} onClick={() => audition(selectedChord, voicing.notes)}>
+                      <span>{voicing.name}</span>
+                      <small>{voicing.notes.map((note) => midiNoteName(note, stored.preference)).join(" ")}</small>
                     </button>
                   ))}
                 </div>
-                <p>Temporary inversion. Save it as a new voicing to keep it.</p>
-              </div>
-              <div>
-                <h3>Personal Voicings</h3>
-                {userVoicings.length === 0 ? (
-                  <p>No personal voicings yet.</p>
-                ) : (
-                  <div className="mini-list">
-                    {userVoicings.map((voicing) => (
-                      <button key={voicing.id} onClick={() => audition(selectedChord, voicing.notes)}>
-                        <span>{voicing.name}</span>
-                        <small>{voicing.notes.map((note) => midiNoteName(note, stored.preference)).join(" ")}</small>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <button className="primary-button" onClick={saveVoicing}>Save as New Voicing</button>
-              </div>
+              )}
+              <button className="primary-button" onClick={saveVoicing}>Save as New Voicing</button>
             </div>
-          </section>
-        )}
+          </div>
+        </section>
       </>
     );
   }
@@ -642,9 +716,9 @@ export default function ChordApp() {
   function renderFavorites() {
     return (
       <>
-        <PageHeading eyebrow="Your harmonic vocabulary" title="Favorites" count={stored.favorites.length} label="saved voicings" />
+        <PageHeading eyebrow="Saved voicings" title="Favorites" />
         {stored.favorites.length === 0 ? (
-          <EmptyState title="No favorites yet" body="Save a system or personal voicing from the Chord Library." action="Browse Library" onAction={() => setPage("Library")} />
+          <EmptyState title="No favorites yet" body="Save a chord from the Library." action="Browse Library" onAction={() => setPage("Library")} />
         ) : (
           <section className="record-list">
             {stored.favorites.map((favorite, index) => (
@@ -653,14 +727,17 @@ export default function ChordApp() {
                 <div className="record-main">
                   <h2>{favorite.symbol}</h2>
                   <p>{favorite.name} · {favorite.notes.map((note) => midiNoteName(note, stored.preference)).join(" · ")}</p>
-                  <small>Last practiced —</small>
                 </div>
                 <button onClick={() => playNotes(favorite.notes)}>Play</button>
                 <button onClick={() => updateStored({ builder: [...stored.builder, { ...favorite, id: crypto.randomUUID() }] })}>＋ Builder</button>
                 <button onClick={() => updateStored({ favorites: stored.favorites.filter((item) => item.id !== favorite.id) })}>Remove</button>
               </article>
             ))}
-            <button className="primary-button practice-favorites" onClick={() => { setPage("Practice"); window.setTimeout(() => startPractice("favorites"), 0); }}>
+            <button className="primary-button practice-favorites" onClick={() => {
+              returnToPracticeSetup();
+              setPracticeSource("favorites");
+              setPage("Practice");
+            }}>
               Practice Favorites
             </button>
           </section>
@@ -679,13 +756,12 @@ export default function ChordApp() {
           </button>
           <label>BPM <input type="number" min={40} max={240} value={bpm} onChange={(event) => setBpm(Math.max(40, Math.min(240, Number(event.target.value))))} /></label>
           <label className="check-label"><input type="checkbox" checked={loop} onChange={(event) => setLoop(event.target.checked)} /> Loop</label>
-          <span>4/4 · one chord per bar · velocity 90</span>
           <button disabled={!stored.builder.length} onClick={saveProgression}>Save Progression</button>
           <button disabled={!stored.builder.length} onClick={() => exportMidi(stored.builder, bpm)}>Export MIDI</button>
           <button disabled={!stored.builder.length} onClick={() => window.confirm("Clear all Builder items?") && updateStored({ builder: [] })}>Clear All</button>
         </section>
         {stored.builder.length === 0 ? (
-          <EmptyState title="Builder is empty" body="Add a chord from the Library or Favorites. Exact notes and bass position are preserved." action="Find Chords" onAction={() => setPage("Library")} />
+          <EmptyState title="Builder is empty" body="Add chords from Library or Favorites." action="Find Chords" onAction={() => setPage("Library")} />
         ) : (
           <section className="builder-timeline">
             {stored.builder.map((item, index) => (
@@ -714,14 +790,16 @@ export default function ChordApp() {
 
   function renderPractice() {
     if (practiceComplete) {
+      const completedItems = practiceItems.length - practiceSkipped;
       return (
         <>
-          <PageHeading eyebrow="Session complete" title="Well Played" count={practiceItems.length} label="completed items" />
+          <PageHeading eyebrow="Session complete" title="Well Played" count={practiceItems.length} label="chords" />
           <section className="practice-result">
             <span>Complete</span>
-            <h2>{practiceItems.length * 3} successful repetitions</h2>
-            <div><strong>{practiceErrors}</strong><small>Total errors</small></div>
-            <div><strong>{practiceItems.length}</strong><small>Completed items</small></div>
+            <h2>{completedItems * 3} successful repetitions</h2>
+            <div><strong>{practiceErrors}</strong><small>Errors</small></div>
+            <div><strong>{completedItems}</strong><small>Completed</small></div>
+            <div><strong>{practiceSkipped}</strong><small>Skipped</small></div>
             <div className="button-row">
               <button className="primary-button" onClick={() => startPractice()}>Practice Again</button>
               <button onClick={returnToPracticeSetup}>Change Setup</button>
@@ -732,7 +810,12 @@ export default function ChordApp() {
     }
     return (
       <>
-        <PageHeading eyebrow="Accuracy before speed" title="Practice Mode" count={practiceItems.length ? practiceIndex + 1 : 0} label={practiceItems.length ? `of ${practiceItems.length}` : "not started"} />
+        <PageHeading
+          eyebrow="Practice"
+          title="Practice Mode"
+          count={practiceItems.length ? practiceIndex + 1 : undefined}
+          label={practiceItems.length ? `of ${practiceItems.length}` : undefined}
+        />
         {!practiceItems.length ? (
           <section className="practice-setup">
             <div>
@@ -745,32 +828,49 @@ export default function ChordApp() {
                 <button className={practiceSource === "favorites" ? "selected" : ""} onClick={() => setPracticeSource("favorites")} disabled={!stored.favorites.length}>
                   Favorites<small>{stored.favorites.length} available</small>
                 </button>
-                <button>Current Family<small>{family}</small></button>
-                <button>Selected Voicings<small>Choose in Library</small></button>
               </div>
+              <label className="number-field">
+                <span>Chords</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={practiceCount}
+                  onChange={(event) => setPracticeCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
+                />
+              </label>
             </div>
             <div>
               <p className="eyebrow">02 · Mode</p>
               <h2>Set the challenge</h2>
               <div className="choice-grid">
-                {(["Chord Learning", "Exact Voicing"] as PracticeMode[]).map((mode) => (
+                {(["Chord Learning", "Exact Voicing", "Hear"] as PracticeMode[]).map((mode) => (
                   <button key={mode} className={practiceMode === mode ? "selected" : ""} onClick={() => setPracticeMode(mode)}>
-                    {mode}<small>{mode === "Chord Learning" ? "Any octave, exact pitch classes" : "Exact MIDI notes and octaves"}</small>
+                    {mode}
+                    <small>{mode === "Chord Learning" ? "Pitch classes" : mode === "Exact Voicing" ? "Exact notes" : "Random voicing"}</small>
                   </button>
                 ))}
               </div>
+              {practiceMode === "Hear" && (
+                <label className="number-field">
+                  <span>Notes per Chord</span>
+                  <input
+                    type="number"
+                    min={2}
+                    max={8}
+                    value={hearNoteCount}
+                    onChange={(event) => setHearNoteCount(Math.max(2, Math.min(8, Number(event.target.value) || 2)))}
+                  />
+                </label>
+              )}
               <label className="check-label"><input type="checkbox" checked={hints} onChange={(event) => setHints(event.target.checked)} /> Visual Hints</label>
-              <p className="eyebrow practice-order-label">03 · Item Order</p>
-              <div className="segmented practice-order">
-                {(["Random", "Sequential"] as PracticeOrder[]).map((order) => (
-                  <button key={order} className={practiceOrder === order ? "active" : ""} onClick={() => setPracticeOrder(order)}>
-                    {order}
-                  </button>
-                ))}
-              </div>
             </div>
-            <button className="primary-button start-practice" onClick={() => startPractice()}>
-              Start Practice · {practiceOrder} · Up to 10 Items
+            <button
+              className="primary-button start-practice"
+              onClick={() => startPractice()}
+              disabled={practiceSource === "favorites" && !stored.favorites.length}
+            >
+              Start Practice · {practiceCount} Chords
             </button>
           </section>
         ) : currentPracticeTarget ? (
@@ -788,11 +888,24 @@ export default function ChordApp() {
               <span>Success {practiceSuccess}/3</span>
             </div>
             <p className="eyebrow">{practiceMode}</p>
-            <h2>{currentPracticeTarget.symbol}</h2>
-            <p className="practice-target">{hints ? currentPracticeTarget.notes.map((note) => midiNoteName(note, stored.preference)).join(" · ") : "Listen, then find the chord."}</p>
-            <button onClick={() => playNotes(currentPracticeTarget.notes)}>Hear Target</button>
+            <h2>{practiceMode === "Hear" && !hints ? "Listen" : currentPracticeTarget.symbol}</h2>
+            {hints && <p className="practice-target">{currentPracticeTarget.notes.map((note) => midiNoteName(note, stored.preference)).join(" · ")}</p>}
+            <div className="practice-buttons">
+              <button onClick={() => playNotes(currentPracticeTarget.notes)}>{practiceMode === "Hear" ? "Hear Again" : "Hear Target"}</button>
+              {practiceMode === "Hear" && (
+                <button onClick={() => saveVoicingFor(
+                  currentPracticeTarget.chordId,
+                  currentPracticeTarget.symbol,
+                  [...new Set(currentPracticeTarget.notes.map((note) => note % 12))],
+                  currentPracticeTarget.notes,
+                )}>
+                  Save as New Voicing
+                </button>
+              )}
+              <button onClick={() => advancePractice(true)}>Skip</button>
+            </div>
             <div className="feedback-line">
-              <span>● Target</span><span>○ Pressed Correct</span><span>× Pressed Wrong</span><span>Errors {practiceErrors}</span>
+              <span>Errors {practiceErrors}</span><span>Skipped {practiceSkipped}</span>
             </div>
           </section>
         ) : null}
@@ -856,7 +969,7 @@ export default function ChordApp() {
         <PageHeading eyebrow="Instrument and data" title="Settings" count={1} label="local profile" />
         <section className="settings-list">
           <article>
-            <div><h2>Accidental Preference</h2><p>Choose how notes are spelled outside a key context.</p></div>
+            <div><h2>Accidental Preference</h2></div>
             <select value={stored.preference} onChange={(event) => updateStored({ preference: event.target.value as AccidentalPreference })}>
               <option value="contextual">Contextual spelling</option>
               <option value="sharps">Prefer sharps</option>
@@ -864,16 +977,16 @@ export default function ChordApp() {
             </select>
           </article>
           <article>
-            <div><h2>MIDI Input</h2><p>Permission, device connection, and live note input.</p></div>
+            <div><h2>MIDI Input</h2></div>
             <span className="setting-status">{midiState}</span>
             <button onClick={connectMidi}>Connect MIDI</button>
           </article>
           <article>
-            <div><h2>Export My Data</h2><p>Voicings, favorites, progressions, practice history, and preferences.</p></div>
+            <div><h2>Export My Data</h2></div>
             <button onClick={exportMyData}>Export JSON</button>
           </article>
           <article>
-            <div><h2>Import My Data</h2><p>Merge a schemaVersion 1 export into this account.</p></div>
+            <div><h2>Import My Data</h2></div>
             <input ref={saveFileRef} type="file" accept="application/json" hidden onChange={(event) => event.target.files?.[0] && void importMyData(event.target.files[0])} />
             <button onClick={() => saveFileRef.current?.click()}>Import JSON</button>
           </article>
@@ -890,9 +1003,8 @@ export default function ChordApp() {
     return (
       <main className="auth-page">
         <section className="auth-card">
-          <p className="eyebrow">Harmonic Practice</p>
+          <p className="eyebrow">Chorda</p>
           <h1>Loading local session</h1>
-          <p>Connecting to the local server.</p>
         </section>
       </main>
     );
@@ -905,12 +1017,11 @@ export default function ChordApp() {
   return (
     <div className={`app-shell ${stored.pianoCollapsed ? "piano-collapsed" : ""}`}>
       <div className="desktop-notice">
-        <span>Harmonic Practice</span>
+        <span>Chorda</span>
         <h1>Desktop viewport required</h1>
-        <p>This first version is designed for screens at least 1024 pixels wide.</p>
       </div>
       <header className="topbar">
-        <button className="wordmark" onClick={() => setPage("Library")}>Harmonic Practice</button>
+        <button className="wordmark" onClick={() => setPage("Library")}>Chorda</button>
         <div className="global-controls">
           <label><span>Key</span><select value={stored.key} onChange={(event) => updateStored({ key: event.target.value })}>{ROOT_OPTIONS.map((root) => <option key={root}>{root}</option>)}</select></label>
           <label><span>Scale / Mode</span><select value={stored.mode} onChange={(event) => updateStored({ mode: event.target.value })}>{Object.keys(MODE_INTERVALS).map((mode) => <option key={mode}>{mode}</option>)}</select></label>
@@ -925,7 +1036,6 @@ export default function ChordApp() {
           {NAV_ITEMS.map((item) => (
             <button key={item.page} className={page === item.page ? "active" : ""} onClick={() => setPage(item.page)}>
               <span>{item.key}</span>{item.page}
-              {item.page === "Favorites" && stored.favorites.length > 0 && <b>{stored.favorites.length}</b>}
               {item.page === "Builder" && stored.builder.length > 0 && <b>{stored.builder.length}</b>}
             </button>
           ))}
@@ -939,6 +1049,7 @@ export default function ChordApp() {
 
       <main>
         {page === "Library" && renderLibrary()}
+        {page === "Chord" && renderChord()}
         {page === "Favorites" && renderFavorites()}
         {page === "Builder" && renderBuilder()}
         {page === "Practice" && renderPractice()}
@@ -1026,7 +1137,7 @@ function LoginScreen({
   return (
     <main className="auth-page">
       <section className="auth-card">
-        <p className="eyebrow">Harmonic Practice</p>
+        <p className="eyebrow">Chorda</p>
         <h1>{canBootstrap ? "Create the first local account" : "Sign in"}</h1>
         <p>
           {canBootstrap
@@ -1066,11 +1177,23 @@ function LoginScreen({
   );
 }
 
-function PageHeading({ eyebrow, title, count, label }: { eyebrow: string; title: string; count: number; label: string }) {
+function PageHeading({
+  eyebrow,
+  title,
+  count,
+  label,
+}: {
+  eyebrow: string;
+  title: string;
+  count?: number;
+  label?: string;
+}) {
   return (
     <section className="page-heading">
       <div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></div>
-      <div className="heading-stat"><span>{count}</span><small>{label}</small></div>
+      {typeof count === "number" && label && (
+        <div className="heading-stat"><span>{count}</span><small>{label}</small></div>
+      )}
     </section>
   );
 }

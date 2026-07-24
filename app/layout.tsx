@@ -11,8 +11,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     title: {
-      default: "Harmonic Practice",
-      template: "%s — Harmonic Practice",
+      default: "Chorda",
+      template: "%s — Chorda",
     },
     description,
     icons: {
@@ -20,13 +20,13 @@ export async function generateMetadata(): Promise<Metadata> {
       shortcut: "/favicon.png",
     },
     openGraph: {
-      title: "Harmonic Practice",
+      title: "Chorda",
       description,
-      images: [{ url: image, width: 1536, height: 1024, alt: "Harmonic Practice — Chords, Voicings, Progressions" }],
+      images: [{ url: image, width: 1536, height: 1024, alt: "Chorda — Chords, Voicings, Progressions" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "Harmonic Practice",
+      title: "Chorda",
       description,
       images: [image],
     },

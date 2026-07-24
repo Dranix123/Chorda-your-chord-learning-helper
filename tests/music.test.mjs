@@ -6,6 +6,7 @@ import {
   invertVoicing,
   isPracticeMatch,
   matchesChordSearch,
+  randomPracticeVoicing,
 } from "../lib/music.ts";
 
 test("C major In Scale contains the seven required diatonic triads", () => {
@@ -45,4 +46,12 @@ test("practice distinguishes pitch classes from exact voicing", () => {
   assert.equal(isPracticeMatch([60, 64, 67], [48, 52, 55], "Chord Learning"), true);
   assert.equal(isPracticeMatch([60, 64, 67], [48, 52, 55], "Exact Voicing"), false);
   assert.equal(isPracticeMatch([48, 52, 55], [48, 52, 55], "Exact Voicing"), true);
+});
+
+test("Hear voicings include every chord tone inside one three-octave window", () => {
+  const voicing = randomPracticeVoicing([0, 4, 7], 6, () => 0);
+  assert.equal(voicing.length, 6);
+  assert.deepEqual([...new Set(voicing.map((note) => note % 12))].sort((a, b) => a - b), [0, 4, 7]);
+  assert.ok(voicing.every((note) => note >= 24 && note <= 83));
+  assert.ok(Math.floor(Math.max(...voicing) / 12) - Math.floor(Math.min(...voicing) / 12) <= 2);
 });

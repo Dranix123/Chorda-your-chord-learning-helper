@@ -101,7 +101,7 @@ input,
 select {
   color: inherit;
   font-size: inherit;
-  border-radius: 8px;
+  border-radius: 0;
 }
 
 button {
@@ -349,7 +349,6 @@ select:focus-visible {
   font-size: 14px;
   letter-spacing: 0.4px;
   text-align: left;
-  border-radius: 8px;
   transition: all 200ms ease;
 }
 
@@ -454,7 +453,7 @@ main {
 
 .library-toolbar {
   display: grid;
-  grid-template-columns: auto minmax(190px, 1fr) 150px 125px;
+  grid-template-columns: auto minmax(190px, 1fr) 170px;
   gap: 14px;
   align-items: end;
   margin-bottom: 28px;
@@ -464,7 +463,6 @@ main {
   display: flex;
   min-height: 44px;
   border: 1px solid var(--input-border);
-  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -507,39 +505,62 @@ main {
   color: var(--input-text);
 }
 
-.view-explanation {
-  margin: -15px 0 24px;
-  color: var(--accent-color);
-  font-size: 12px;
-  font-style: italic;
-}
-
-.chord-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
-  gap: 18px;
-}
-
-.load-more {
+.degree-groups {
   display: flex;
-  justify-content: center;
-  padding: 30px 0 4px;
+  flex-direction: column;
+  gap: 28px;
 }
 
-.load-more button {
-  min-height: 44px;
-  padding: 0 22px;
-  background: transparent;
-  border: 1px solid var(--input-border);
-  color: var(--text-primary);
+.degree-row {
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--footer-border);
+}
+
+.degree-row > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.degree-row > header div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.degree-row > header span {
+  font-size: 26px;
+}
+
+.degree-row > header small {
+  color: var(--accent-color);
   font-size: 11px;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
 
+.degree-row > header button,
+.chord-page-actions button {
+  min-height: 36px;
+  padding: 0 13px;
+  background: transparent;
+  border: 1px solid var(--input-border);
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.degree-chord-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .chord-card {
   position: relative;
-  min-height: 224px;
+  min-height: 168px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 8px;
@@ -558,19 +579,12 @@ main {
 .card-main {
   display: block;
   width: 100%;
-  min-height: 172px;
-  padding: 20px 20px 15px;
+  min-height: 120px;
+  padding: 18px;
   background: transparent;
   border: 0;
   color: var(--text-primary);
   text-align: left;
-}
-
-.card-degree {
-  float: right;
-  color: var(--accent-color);
-  font-size: 14px;
-  font-style: italic;
 }
 
 .card-main h2 {
@@ -586,27 +600,19 @@ main {
   font-size: 14px;
 }
 
-.card-meta {
-  display: flex;
-  gap: 12px;
-  margin-top: 19px;
+.card-family {
+  display: block;
+  margin-top: 13px;
   color: var(--accent-color);
   font-size: 10px;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
 
-.source-label {
-  margin-top: 4px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-style: italic;
-}
-
 .card-actions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  min-height: 52px;
+  grid-template-columns: repeat(2, 1fr);
+  min-height: 48px;
   border-top: 1px solid var(--card-border);
 }
 
@@ -629,15 +635,19 @@ main {
   color: var(--bg-color);
 }
 
-.voicing-count {
-  position: absolute;
-  top: 14px;
-  left: 20px;
-  color: var(--accent-color);
-  font-size: 9px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  transform: translateY(-7px);
+.chord-page-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: -20px;
+}
+
+.chord-workspace {
+  margin-top: 18px;
+}
+
+.chord-workspace .detail-columns {
+  border-top: 0;
 }
 
 .detail-panel {
@@ -966,19 +976,32 @@ main {
   text-transform: none;
 }
 
+.number-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 16px 0;
+  color: var(--accent-color);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.number-field input {
+  width: 92px;
+  height: 40px;
+  padding: 0 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--input-text);
+}
+
 .start-practice {
   grid-column: 1 / -1;
   justify-self: center;
   min-width: 260px !important;
   min-height: 48px !important;
-}
-
-.practice-order-label {
-  margin-top: 22px;
-}
-
-.practice-order {
-  margin-top: 8px;
 }
 
 .practice-stage {
@@ -1055,6 +1078,13 @@ main {
   font-size: 18px;
 }
 
+.practice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .feedback-line {
   display: flex;
   gap: 22px;
@@ -1069,7 +1099,7 @@ main {
 
 .practice-result {
   display: grid;
-  grid-template-columns: 1fr 150px 150px;
+  grid-template-columns: minmax(240px, 1fr) repeat(3, 110px);
   gap: 24px;
   align-items: end;
   max-width: 850px;

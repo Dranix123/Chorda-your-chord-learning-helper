@@ -97,7 +97,8 @@ export function isLocalRequest(request: Request): boolean {
   return host === "localhost"
     || host === "127.0.0.1"
     || host === "::1"
-    || host === "chords.vulpolirant.com";
+    || host === "chords.vulpolirant.com"
+    || host === "chorda.vulpollirant.com";
 }
 
 export async function hashPassword(password: string, salt?: Uint8Array) {

@@ -149,6 +149,34 @@ export function defaultVoicing(rootPc: number, intervals: number[]): number[] {
   return [...new Set(intervals.map((interval) => rootMidi + interval))].sort((a, b) => a - b);
 }
 
+export function randomPracticeVoicing(
+  pitchClasses: number[],
+  noteCount: number,
+  random: () => number = Math.random,
+): number[] {
+  const tones = [...new Set(pitchClasses.map((pitchClass) => ((pitchClass % 12) + 12) % 12))];
+  if (!tones.length || noteCount < tones.length || noteCount > tones.length * 3) {
+    throw new Error("The requested note count cannot include every chord tone within three octaves.");
+  }
+
+  const windowStart = 24 + Math.floor(random() * 3) * 12;
+  const candidates = tones.flatMap((pitchClass) =>
+    [0, 1, 2].map((octave) => windowStart + octave * 12 + pitchClass),
+  );
+  const selected = tones.map((pitchClass) => {
+    const choices = candidates.filter((note) => note % 12 === pitchClass);
+    return choices[Math.floor(random() * choices.length)];
+  });
+  const remaining = candidates.filter((note) => !selected.includes(note));
+
+  for (let index = remaining.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [remaining[index], remaining[swapIndex]] = [remaining[swapIndex], remaining[index]];
+  }
+
+  return [...selected, ...remaining.slice(0, noteCount - selected.length)].sort((a, b) => a - b);
+}
+
 export function buildChords(
   key: string,
   mode: string,
@@ -183,6 +211,8 @@ export function buildChords(
           return pitchClasses.every((tone) => neighborScale.includes(tone));
         });
         if (!match || scalePcs.includes(rootPc)) continue;
+        const neighborScale = scale.map((interval) => (match.pc + interval) % 12);
+        degree = ROMAN[neighborScale.indexOf(rootPc)] ?? "—";
         source = match.label;
       }
       const rootName = canonicalRoot(rootPc, preference);

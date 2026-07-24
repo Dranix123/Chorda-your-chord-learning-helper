@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import ChordApp from "./chord-app";
 
 export const metadata: Metadata = {
-  title: "Harmonic Practice — Chords & Voicings",
+  title: "Chords & Voicings",
   description: "Discover, save, build, and practice exact piano chord voicings.",
 };
 

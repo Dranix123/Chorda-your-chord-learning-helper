@@ -45,7 +45,7 @@ export default defineConfig(async () => {
 
   return {
     server: {
-      allowedHosts: ["chords.vulpolirant.com"],
+      allowedHosts: ["chords.vulpolirant.com", "chorda.vulpollirant.com"],
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),

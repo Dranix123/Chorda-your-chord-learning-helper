@@ -1,4 +1,4 @@
-# Harmonic Practice
+# Chorda
 
 Desktop-first chord, piano voicing, progression, and deliberate-practice workspace.
 
@@ -22,27 +22,30 @@ npm test
 npm run lint
 ```
 
-Tests cover server rendering, removal of starter artifacts, required style tokens, diatonic chord generation, default voicings, accidental-aware search, inversion, and both practice matching modes.
+Tests cover server rendering, required style tokens, diatonic chord generation, default and randomized voicings, accidental-aware search, inversion, and practice matching.
 
 ## Product features
 
 - Complete In Scale results plus clearly labeled Neighbor Keys discoveries
-- Learning-order results that show basic chords across every scale degree first
-- Continue-loading for large chord result sets
+- Scale-degree rows with per-degree expansion
+- Dedicated Chord workspace opened by double-clicking a Library card
 - 12 roots and all V1 scale/mode formulas
 - Triad, sixth, seventh, extended, and added-tone chord families
 - Caslon-based dark/light editorial visual system
 - Exact 88-key on-screen piano and Web MIDI input
-- System and personal voicings with validation and bass-note inversions
+- System and personal voicings with validation and root-note selection
 - Server-synced Favorites and Progression Builder
 - Standard MIDI file export at PPQ 480, 4/4, one chord per bar
-- Chord Learning and Exact Voicing practice modes
+- Random Chord Learning, Exact Voicing, and Hear practice modes
+- Configurable practice length, Hear note count, skipping, and saved generated voicings
 - Progression templates and personal progressions
 - Versioned JSON data export/import
 
 ## Local data and identity
 
-The first account can only be created from localhost or the configured `chords.vulpolirant.com` host, and only while the user table is empty. Passwords are stored as salted PBKDF2-SHA-256 hashes, and login uses an HttpOnly, SameSite session cookie. Every data read and write derives identity on the server; the client does not submit a `userId`.
+The first account can only be created from localhost or a configured Chorda host (`chords.vulpolirant.com` or `chorda.vulpollirant.com`), and only while the user table is empty. Passwords are stored as salted PBKDF2-SHA-256 hashes, and login uses an HttpOnly, SameSite session cookie. Every data read and write derives identity on the server; the client does not submit a `userId`.
+
+All configured hosts use the same account and user-state database. Browser session cookies remain scoped to each hostname, so the same account may need to sign in once per access address.
 
 The checked-in migrations are `drizzle/0000_user_states.sql` and `drizzle/0001_local_auth.sql`.
 
