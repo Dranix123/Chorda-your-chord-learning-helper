@@ -789,7 +789,7 @@ main {
 
 .mini-list article {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   border: 1px solid var(--input-border);
   border-radius: 8px;
   overflow: hidden;
@@ -804,9 +804,12 @@ main {
   text-align: left;
 }
 
-.mini-list .voicing-delete {
-  justify-content: center;
+.mini-list article > button:not(:first-child) {
   border-left: 1px solid var(--input-border);
+  justify-content: center;
+}
+
+.mini-list .voicing-delete {
   color: var(--text-secondary);
 }
 
@@ -1302,7 +1305,7 @@ main {
 
 .piano-toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto auto auto auto;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto auto auto auto;
   gap: 10px;
   align-items: center;
   min-height: 56px;

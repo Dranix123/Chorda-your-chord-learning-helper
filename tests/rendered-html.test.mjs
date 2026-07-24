@@ -24,6 +24,8 @@ test("builds the finished chord-learning product", async () => {
   assert.match(product, /Back to Setup/);
   assert.match(product, />Back</);
   assert.match(product, /Sound · \{stored\.instrument\}/);
+  assert.match(client, /addPianoSelectionToBuilder/);
+  assert.match(client, /setVoicingBass/);
   assert.match(client, /instrument:\s*"Piano"/);
   assert.match(client, /playProgression\(stored\.builder,\s*bpm,\s*stored\.instrument\)/);
   assert.match(client, /chords\.slice\(0,\s*6\)/);

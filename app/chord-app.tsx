@@ -6,12 +6,12 @@ import {
   PROGRESSION_TEMPLATES,
   ROOT_OPTIONS,
   buildChords,
-  invertVoicing,
   isPracticeMatch,
   matchesChordSearch,
   midiNoteName,
   progressionChordForNumeral,
   randomPracticeVoicing,
+  setVoicingBass,
   type AccidentalPreference,
   type Chord,
 } from "@/lib/music";
@@ -407,6 +407,24 @@ export default function ChordApp() {
     setStatus(`${chord.symbol} added to Builder`);
   }
 
+  function addPianoSelectionToBuilder() {
+    if (!selectedNotes.length) return;
+    const matchesSelectedChord = selectedChord
+      && selectedNotes.every((note) => selectedChord.pitchClasses.includes(note % 12));
+    const item = matchesSelectedChord
+      ? snapshotFor(selectedChord, selectedNotes, "Piano Voicing")
+      : {
+          id: crypto.randomUUID(),
+          chordId: "custom",
+          symbol: "Custom",
+          name: "Piano Voicing",
+          notes: [...selectedNotes].sort((a, b) => a - b),
+          source: "Piano",
+        };
+    updateStored({ builder: [...stored.builder, item] });
+    setStatus(`${item.symbol} added to Builder`);
+  }
+
   function saveVoicingFor(chordId: string, chordSymbol: string, chordPitchClasses: number[], notes: number[]) {
     if (notes.length < 2 || notes.length > 16 || notes.some((note) => note < 21 || note > 108)) {
       setStatus("Choose 2–16 notes within A0–C8.");
@@ -732,8 +750,12 @@ export default function ChordApp() {
               <h3>System Default</h3>
               <p className="large-notes">{selectedChord.voicing.map((note) => midiNoteName(note, stored.preference)).join(" · ")}</p>
               <div className="button-row">
-                <button className="primary-button" onClick={() => audition(selectedChord)}>Play Voicing</button>
+                <button className="primary-button" onClick={() => {
+                  setSelectedNotes(selectedChord.voicing);
+                  audition(selectedChord);
+                }}>Play Voicing</button>
                 <button onClick={() => setSelectedNotes(selectedChord.voicing)}>Edit on Piano</button>
+                <button onClick={() => addToBuilder(selectedChord)}>＋ Builder</button>
               </div>
             </div>
             <div>
@@ -743,7 +765,10 @@ export default function ChordApp() {
                   <button
                     key={pc}
                     onClick={() => {
-                      const notes = invertVoicing(selectedChord, pc);
+                      const notes = setVoicingBass(
+                        selectedNotes.length ? selectedNotes : selectedChord.voicing,
+                        pc,
+                      );
                       setSelectedNotes(notes);
                       setActiveNotes(notes);
                       playNotes(notes, 1.5, stored.instrument);
@@ -760,10 +785,14 @@ export default function ChordApp() {
                 <div className="mini-list">
                   {userVoicings.map((voicing) => (
                     <article key={voicing.id}>
-                      <button className="voicing-play" onClick={() => audition(selectedChord, voicing.notes)}>
+                      <button className="voicing-play" onClick={() => {
+                        setSelectedNotes(voicing.notes);
+                        audition(selectedChord, voicing.notes);
+                      }}>
                         <span>{voicing.name}</span>
                         <small>{voicing.notes.map((note) => midiNoteName(note, stored.preference)).join(" ")}</small>
                       </button>
+                      <button onClick={() => addToBuilder(selectedChord, voicing.notes, voicing.name)}>＋ Builder</button>
                       <button
                         className="voicing-delete"
                         aria-label={`Delete ${voicing.name}`}
@@ -1159,6 +1188,7 @@ export default function ChordApp() {
               </div>
             )}
           </div>
+          <button disabled={!selectedNotes.length} onClick={addPianoSelectionToBuilder}>＋ Builder</button>
           <button onClick={() => setSelectedNotes([])}>Clear</button>
           <button onClick={() => selectedNotes.length && playNotes(selectedNotes, 1.5, stored.instrument)}>Play Selection</button>
           <button onClick={() => updateStored({ pianoCollapsed: !stored.pianoCollapsed })}>{stored.pianoCollapsed ? "Expand" : "Collapse"}</button>

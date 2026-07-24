@@ -8,6 +8,7 @@ import {
   matchesChordSearch,
   progressionChordForNumeral,
   randomPracticeVoicing,
+  setVoicingBass,
 } from "../lib/music.ts";
 
 test("C major In Scale contains the seven required diatonic triads", () => {
@@ -41,6 +42,12 @@ test("inversion moves the selected chord tone to the bass", () => {
   assert.ok(chord);
   const inversion = invertVoicing(chord, 4);
   assert.equal(inversion[0] % 12, 4);
+});
+
+test("a saved voicing can move any present chord tone to the bass", () => {
+  const changed = setVoicingBass([36, 55, 64], 7);
+  assert.equal(changed[0] % 12, 7);
+  assert.deepEqual(changed.map((note) => note % 12).sort((a, b) => a - b), [0, 4, 7]);
 });
 
 test("practice distinguishes pitch classes from exact voicing", () => {

@@ -273,6 +273,31 @@ export function invertVoicing(chord: Chord, bassPc: number): number[] {
   return result;
 }
 
+export function setVoicingBass(notes: number[], bassPc: number): number[] {
+  const sorted = [...notes].sort((a, b) => a - b);
+  const targetIndex = sorted.findIndex((note) => ((note % 12) + 12) % 12 === bassPc);
+  if (targetIndex <= 0) return sorted;
+
+  let shiftedTarget = sorted[targetIndex];
+  while (shiftedTarget >= sorted[0] && shiftedTarget - 12 >= 21) {
+    shiftedTarget -= 12;
+  }
+  if (shiftedTarget < sorted[0]) {
+    sorted[targetIndex] = shiftedTarget;
+    return sorted.sort((a, b) => a - b);
+  }
+
+  const target = sorted[targetIndex];
+  return sorted
+    .map((note, index) => {
+      if (index === targetIndex) return target;
+      let shifted = note;
+      while (shifted < target) shifted += 12;
+      return shifted;
+    })
+    .sort((a, b) => a - b);
+}
+
 export const PROGRESSION_TEMPLATES: Record<string, string[][]> = {
   Major: [
     ["I", "V", "vi", "IV"],
