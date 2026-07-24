@@ -28,6 +28,9 @@ test("builds the finished chord-learning product", async () => {
   assert.match(client, /setVoicingBass/);
   assert.match(client, /instrument:\s*"Piano"/);
   assert.match(client, /playProgression\(stored\.builder,\s*bpm,\s*stored\.instrument\)/);
+  assert.match(client, /startMidiNote\(audioContext,\s*data1,\s*data2,\s*instrumentRef\.current\)/);
+  assert.match(client, /command === 0xb0 && data1 === 64/);
+  assert.match(client, /await audioContext\.resume\(\)/);
   assert.match(client, /chords\.slice\(0,\s*6\)/);
   assert.match(client, /choice-grid challenge-grid/);
   assert.doesNotMatch(product, /codex-preview|Your site is taking shape|react-loading-skeleton/);
@@ -38,10 +41,12 @@ test("builds the finished chord-learning product", async () => {
 });
 
 test("uses the required local font and product metadata", async () => {
-  const [css, layout, packageJson] = await Promise.all([
+  const [css, layout, packageJson, viteConfig, cacheScript] = await Promise.all([
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/clear-dev-cache.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(css, /font-family:\s*"Caslon"/);
   assert.match(css, /--bg-color:\s*#0f0f0f/);
@@ -52,4 +57,10 @@ test("uses the required local font and product metadata", async () => {
   assert.match(css, /\.challenge-grid[\s\S]*repeat\(3,/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.match(packageJson, /"predev":\s*"node scripts\/clear-dev-cache\.mjs"/);
+  assert.match(viteConfig, /"react-server-dom-webpack\/client\.browser"/);
+  assert.match(viteConfig, /hmr:\s*false/);
+  assert.match(viteConfig, /"Cache-Control":\s*"no-store"/);
+  assert.match(cacheScript, /node_modules\/\.vite/);
+  assert.doesNotMatch(cacheScript, /\.wrangler/);
 });

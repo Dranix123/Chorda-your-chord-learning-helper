@@ -28,6 +28,15 @@ type AuthUser = {
   source: "local" | "workspace";
 };
 
+type ScheduledSound = {
+  stop: () => void;
+};
+
+type MidiInputLike = {
+  name?: string;
+  onmidimessage: ((event: { data: Uint8Array }) => void) | null;
+};
+
 type Voicing = {
   id: string;
   chordId: string;
@@ -182,19 +191,26 @@ function scheduleNotes(
   startTime: number,
   duration: number,
   instrument: Instrument,
-) {
+  sustained = false,
+  velocity = 1,
+): ScheduledSound {
   const profile = instrument === "Piano"
     ? { partials: [1, 2, 3, 4, 5], levels: [1, 0.34, 0.16, 0.08, 0.035], attack: 0.006, cutoff: 4200 }
     : instrument === "Electric Piano"
       ? { partials: [1, 2, 3, 6], levels: [1, 0.42, 0.18, 0.06], attack: 0.012, cutoff: 5600 }
       : { partials: [1, 2, 3, 4], levels: [1, 0.5, 0.25, 0.12], attack: 0.025, cutoff: 6800 };
   const chordGain = context.createGain();
-  chordGain.gain.setValueAtTime(0.16 / Math.max(1, Math.sqrt(notes.length)), startTime);
+  chordGain.gain.setValueAtTime(
+    (0.16 * (0.25 + velocity * 0.75)) / Math.max(1, Math.sqrt(notes.length)),
+    startTime,
+  );
   const filter = context.createBiquadFilter();
   filter.type = "lowpass";
   filter.frequency.setValueAtTime(profile.cutoff, startTime);
   chordGain.connect(filter);
   filter.connect(destination);
+  const oscillators: OscillatorNode[] = [];
+  const envelopes: GainNode[] = [];
   notes.forEach((note) => {
     const frequency = 440 * 2 ** ((note - 69) / 12);
     profile.partials.forEach((harmonic, index) => {
@@ -204,16 +220,43 @@ function scheduleNotes(
       oscillator.frequency.value = frequency * harmonic;
       envelope.gain.setValueAtTime(0.001, startTime);
       envelope.gain.linearRampToValueAtTime(profile.levels[index], startTime + profile.attack);
-      if (instrument === "Organ") {
+      if (sustained) {
+        const sustainLevel = instrument === "Organ" ? 0.8 : instrument === "Electric Piano" ? 0.42 : 0.24;
+        envelope.gain.exponentialRampToValueAtTime(
+          Math.max(0.001, profile.levels[index] * sustainLevel),
+          startTime + 0.22,
+        );
+      } else if (instrument === "Organ") {
         envelope.gain.setValueAtTime(profile.levels[index] * 0.75, startTime + duration * 0.82);
       }
-      envelope.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+      if (!sustained) {
+        envelope.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+      }
       oscillator.connect(envelope);
       envelope.connect(chordGain);
       oscillator.start(startTime);
       oscillator.stop(startTime + duration);
+      oscillators.push(oscillator);
+      envelopes.push(envelope);
     });
   });
+
+  let stopped = false;
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      const stopTime = context.currentTime;
+      const releaseTime = stopTime + 0.12;
+      envelopes.forEach((envelope) => {
+        envelope.gain.cancelAndHoldAtTime(stopTime);
+        envelope.gain.exponentialRampToValueAtTime(0.001, releaseTime);
+      });
+      oscillators.forEach((oscillator) => {
+        oscillator.stop(releaseTime + 0.02);
+      });
+    },
+  };
 }
 
 function playNotes(notes: number[], duration = 1.5, instrument: Instrument = "Piano") {
@@ -241,6 +284,41 @@ function playProgression(items: Snapshot[], bpm: number, instrument: Instrument)
   });
   const totalDuration = items.length * secondsPerChord + 0.3;
   window.setTimeout(() => void context.close(), totalDuration * 1000);
+}
+
+let midiAudioContext: AudioContext | null = null;
+
+function getMidiAudioContext() {
+  const AudioContextClass = window.AudioContext ?? window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  midiAudioContext ??= new AudioContextClass();
+  return midiAudioContext;
+}
+
+function startMidiNote(
+  context: AudioContext,
+  note: number,
+  velocity: number,
+  instrument: Instrument,
+): ScheduledSound {
+  const master = context.createGain();
+  master.connect(context.destination);
+  const sound = scheduleNotes(
+    context,
+    master,
+    [note],
+    context.currentTime,
+    120,
+    instrument,
+    true,
+    velocity / 127,
+  );
+  return {
+    stop() {
+      sound.stop();
+      window.setTimeout(() => master.disconnect(), 180);
+    },
+  };
 }
 
 declare global {
@@ -279,6 +357,11 @@ export default function ChordApp() {
   const [practiceSkipped, setPracticeSkipped] = useState(0);
   const [practiceComplete, setPracticeComplete] = useState(false);
   const [instrumentMenuOpen, setInstrumentMenuOpen] = useState(false);
+  const midiVoicesRef = useRef(new Map<number, ScheduledSound>());
+  const midiHeldNotesRef = useRef(new Set<number>());
+  const midiSustainedNotesRef = useRef(new Set<number>());
+  const midiSustainRef = useRef(false);
+  const instrumentRef = useRef<Instrument>(DEFAULT_STATE.instrument);
   const saveFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -324,6 +407,15 @@ export default function ChordApp() {
   }, [authUser]);
 
   useDebouncedStateSave(stored, hydrated);
+
+  useEffect(() => {
+    instrumentRef.current = stored.instrument;
+  }, [stored.instrument]);
+
+  useEffect(() => () => {
+    midiVoicesRef.current.forEach((voice) => voice.stop());
+    midiVoicesRef.current.clear();
+  }, []);
 
   const allChords = useMemo(
     () => buildChords(stored.key, stored.mode, stored.preference, view),
@@ -568,7 +660,7 @@ export default function ChordApp() {
   async function connectMidi() {
     const midiNavigator = navigator as Navigator & {
       requestMIDIAccess?: () => Promise<{
-        inputs: Map<string, { name?: string; onmidimessage: ((event: { data: Uint8Array }) => void) | null }>;
+        inputs: Map<string, MidiInputLike>;
       }>;
     };
     if (!midiNavigator.requestMIDIAccess) {
@@ -576,6 +668,12 @@ export default function ChordApp() {
       return;
     }
     try {
+      const audioContext = getMidiAudioContext();
+      if (!audioContext) {
+        setMidiState("Web Audio unavailable");
+        return;
+      }
+      await audioContext.resume();
       const access = await midiNavigator.requestMIDIAccess();
       const input = [...access.inputs.values()][0];
       if (!input) {
@@ -584,12 +682,54 @@ export default function ChordApp() {
       }
       input.onmidimessage = (event) => {
         if (!event.data) return;
-        const [command, note, velocity] = event.data;
-        const isNoteOn = (command & 0xf0) === 0x90 && velocity > 0;
-        const isNoteOff = (command & 0xf0) === 0x80 || ((command & 0xf0) === 0x90 && velocity === 0);
+        const [statusByte, data1, data2] = event.data;
+        const command = statusByte & 0xf0;
+        const isNoteOn = command === 0x90 && data2 > 0;
+        const isNoteOff = command === 0x80 || (command === 0x90 && data2 === 0);
+
+        if (command === 0xb0 && data1 === 64) {
+          const pedalDown = data2 >= 64;
+          midiSustainRef.current = pedalDown;
+          if (!pedalDown) {
+            const releasedNotes = [...midiSustainedNotesRef.current]
+              .filter((note) => !midiHeldNotesRef.current.has(note));
+            releasedNotes.forEach((note) => {
+              midiVoicesRef.current.get(note)?.stop();
+              midiVoicesRef.current.delete(note);
+            });
+            midiSustainedNotesRef.current.clear();
+            setSelectedNotes((notes) =>
+              notes.filter((note) => !releasedNotes.includes(note)),
+            );
+          }
+          return;
+        }
+
+        if (isNoteOn) {
+          midiVoicesRef.current.get(data1)?.stop();
+          midiVoicesRef.current.set(
+            data1,
+            startMidiNote(audioContext, data1, data2, instrumentRef.current),
+          );
+          midiHeldNotesRef.current.add(data1);
+          midiSustainedNotesRef.current.delete(data1);
+        }
+
+        if (isNoteOff) {
+          midiHeldNotesRef.current.delete(data1);
+          if (midiSustainRef.current) {
+            midiSustainedNotesRef.current.add(data1);
+          } else {
+            midiVoicesRef.current.get(data1)?.stop();
+            midiVoicesRef.current.delete(data1);
+          }
+        }
+
         setSelectedNotes((notes) => {
-          if (isNoteOn && !notes.includes(note)) return [...notes, note];
-          if (isNoteOff) return notes.filter((value) => value !== note);
+          if (isNoteOn && !notes.includes(data1)) return [...notes, data1];
+          if (isNoteOff && !midiSustainRef.current) {
+            return notes.filter((value) => value !== data1);
+          }
           return notes;
         });
       };

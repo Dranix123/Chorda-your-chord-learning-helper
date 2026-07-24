@@ -44,8 +44,22 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    optimizeDeps: {
+      include: [
+        "react",
+        "react-dom",
+        "react-dom/client",
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime",
+        "react-server-dom-webpack/client.browser",
+      ],
+    },
     server: {
       allowedHosts: ["chords.vulpolirant.com", "chorda.vulpollirant.com"],
+      hmr: false,
+      headers: {
+        "Cache-Control": "no-store",
+      },
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),
