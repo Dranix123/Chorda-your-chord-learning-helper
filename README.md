@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. On the first run, create the first local account in the one-time setup screen. Later visits require that username and password; the product no longer enters through a default user.
+Open `http://localhost:1210`. On the first run, create the first local account in the one-time setup screen. Later visits require that username and password; the product no longer enters through a default user.
 
 The local development database is a project-local D1/SQLite database managed by Miniflare. Accounts, sessions, favorites, voicings, Builder state, progressions, preferences, and imports are stored on the local server, not in browser storage.
 
