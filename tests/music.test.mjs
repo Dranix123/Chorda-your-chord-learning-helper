@@ -9,12 +9,16 @@ import {
 } from "../lib/music.ts";
 
 test("C major In Scale contains the seven required diatonic triads", () => {
-  const triads = buildChords("C", "Major", "contextual", "In Scale")
+  const chords = buildChords("C", "Major", "contextual", "In Scale");
+  const triads = chords
     .filter((chord) => chord.family === "Triads")
     .map((chord) => chord.symbol);
   for (const required of ["C", "Dm", "Em", "F", "G", "Am", "Bdim"]) {
     assert.ok(triads.includes(required), `missing ${required}`);
   }
+  assert.ok(chords.length > 36, "expected the complete result set to require continue-loading");
+  assert.deepEqual([...new Set(chords.map((chord) => chord.root))].sort(), ["A", "B", "C", "D", "E", "F", "G"]);
+  assert.ok(chords.every((chord) => chord.pitchClasses.every((pitchClass) => [0, 2, 4, 5, 7, 9, 11].includes(pitchClass))));
 });
 
 test("default C major voicing is C3 E3 G3", () => {

@@ -1,14 +1,9 @@
-import { env } from "cloudflare:workers";
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-
-const CREATE_STATE_TABLE = `
-  CREATE TABLE IF NOT EXISTS user_states (
-    user_id TEXT PRIMARY KEY NOT NULL,
-    state_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )
-`;
+import {
+  AuthenticationError,
+  database,
+  requireUser,
+} from "@/lib/server-auth";
 
 const EMPTY_STATE = {
   favorites: [],
@@ -21,27 +16,19 @@ const EMPTY_STATE = {
   pianoCollapsed: false,
 };
 
-async function currentUserId(): Promise<string> {
-  const requestHeaders = await headers();
-  return requestHeaders.get("oai-authenticated-user-email")?.toLowerCase() ?? "local-demo";
-}
-
-async function database() {
-  const binding = (env as unknown as { DB: D1Database }).DB;
-  await binding.prepare(CREATE_STATE_TABLE).run();
-  return binding;
-}
-
 export async function GET() {
   try {
     const db = await database();
-    const userId = await currentUserId();
+    const user = await requireUser();
     const record = await db
       .prepare("SELECT state_json FROM user_states WHERE user_id = ?")
-      .bind(userId)
+      .bind(user.id)
       .first<{ state_json: string }>();
     return NextResponse.json(record ? JSON.parse(record.state_json) : EMPTY_STATE);
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
     return NextResponse.json(EMPTY_STATE);
   }
 }
@@ -54,7 +41,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "State payload is too large." }, { status: 413 });
     }
     const db = await database();
-    const userId = await currentUserId();
+    const user = await requireUser();
     const updatedAt = new Date().toISOString();
     await db
       .prepare(
@@ -64,10 +51,13 @@ export async function POST(request: Request) {
            state_json = excluded.state_json,
            updated_at = excluded.updated_at`,
       )
-      .bind(userId, serialized, updatedAt)
+      .bind(user.id, serialized, updatedAt)
       .run();
     return NextResponse.json({ ok: true, updatedAt });
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
     return NextResponse.json({ error: "Could not save state." }, { status: 500 });
   }
 }

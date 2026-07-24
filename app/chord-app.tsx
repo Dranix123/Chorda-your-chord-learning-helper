@@ -15,8 +15,16 @@ import {
 } from "@/lib/music";
 
 type Page = "Library" | "Favorites" | "Builder" | "Practice" | "Progressions" | "Settings";
-type ChordView = "In Scale" | "Neighbor Keys" | "All Chords";
+type ChordView = "In Scale" | "Neighbor Keys";
 type PracticeMode = "Chord Learning" | "Exact Voicing";
+type PracticeOrder = "Random" | "Sequential";
+type PracticeSource = "scale" | "favorites";
+
+type AuthUser = {
+  id: string;
+  username: string;
+  source: "local" | "workspace";
+};
 
 type Voicing = {
   id: string;
@@ -181,13 +189,16 @@ declare global {
 }
 
 export default function ChordApp() {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [canBootstrap, setCanBootstrap] = useState(false);
   const [page, setPage] = useState<Page>("Library");
   const [stored, setStored] = useState<PersistedState>(DEFAULT_STATE);
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<ChordView>("In Scale");
   const [family, setFamily] = useState("All Families");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState("Degree");
+  const [sort, setSort] = useState("Learning Order");
   const [selectedChord, setSelectedChord] = useState<Chord | null>(null);
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
   const [selectedNotes, setSelectedNotes] = useState<number[]>([]);
@@ -196,18 +207,45 @@ export default function ChordApp() {
   const [loop, setLoop] = useState(false);
   const [midiState, setMidiState] = useState("Not connected");
   const [practiceMode, setPracticeMode] = useState<PracticeMode>("Chord Learning");
+  const [practiceOrder, setPracticeOrder] = useState<PracticeOrder>("Random");
+  const [practiceSource, setPracticeSource] = useState<PracticeSource>("scale");
   const [hints, setHints] = useState(true);
   const [practiceItems, setPracticeItems] = useState<Snapshot[]>([]);
   const [practiceIndex, setPracticeIndex] = useState(0);
   const [practiceSuccess, setPracticeSuccess] = useState(0);
   const [practiceErrors, setPracticeErrors] = useState(0);
   const [practiceComplete, setPracticeComplete] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(36);
   const saveFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let active = true;
+    void fetch("/api/auth/me")
+      .then((response) => response.json())
+      .then((data) => {
+        if (!active) return;
+        setAuthUser(data.authenticated ? data.user : null);
+        setCanBootstrap(Boolean(data.canBootstrap));
+        setAuthChecked(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setStatus("Cannot reach the local server.");
+        setAuthChecked(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
+    let active = true;
     void fetch("/api/state")
-      .then((response) => (response.ok ? response.json() : DEFAULT_STATE))
+      .then((response) => {
+        if (response.status === 401) throw new Error("Session expired");
+        return response.ok ? response.json() : DEFAULT_STATE;
+      })
       .then((data) => {
         if (!active) return;
         setStored({ ...DEFAULT_STATE, ...data });
@@ -216,12 +254,11 @@ export default function ChordApp() {
       .catch(() => {
         if (!active) return;
         setStatus("Cannot reach the local server.");
-        setHydrated(true);
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [authUser]);
 
   useDebouncedStateSave(stored, hydrated);
 
@@ -234,12 +271,22 @@ export default function ChordApp() {
     const result = allChords.filter(
       (chord) => (family === "All Families" || chord.family === family) && matchesChordSearch(chord, query),
     );
+    if (sort === "Learning Order") {
+      const degrees = ["I", "II", "III", "IV", "V", "VI", "VII"];
+      return [...result].sort(
+        (a, b) =>
+          a.complexity - b.complexity ||
+          a.voicing.length - b.voicing.length ||
+          degrees.indexOf(a.degree) - degrees.indexOf(b.degree) ||
+          a.symbol.localeCompare(b.symbol),
+      );
+    }
     if (sort === "Name") return [...result].sort((a, b) => a.symbol.localeCompare(b.symbol));
     if (sort === "Complexity") return [...result].sort((a, b) => a.complexity - b.complexity || a.symbol.localeCompare(b.symbol));
     return result;
   }, [allChords, family, query, sort]);
 
-  const displayedChords = filteredChords.slice(0, 36);
+  const displayedChords = filteredChords.slice(0, visibleCount);
   const userVoicings = selectedChord
     ? stored.voicings.filter((voicing) => voicing.chordId === selectedChord.id)
     : [];
@@ -249,6 +296,21 @@ export default function ChordApp() {
   const updateStored = useCallback((patch: Partial<PersistedState>) => {
     setStored((current) => ({ ...current, ...patch }));
   }, []);
+
+  function finishAuthentication(user: AuthUser) {
+    setAuthUser(user);
+    setCanBootstrap(false);
+    setStatus("Signed in");
+  }
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setAuthUser(null);
+    setStored(DEFAULT_STATE);
+    setHydrated(false);
+    setPage("Library");
+    setStatus("Signed out");
+  }
 
   function audition(chord: Chord, notes = chord.voicing) {
     setSelectedChord(chord);
@@ -298,18 +360,34 @@ export default function ChordApp() {
     setStatus(`${voicing.name} saved`);
   }
 
-  function startPractice(source: "scale" | "favorites" = "scale") {
-    const sourceItems =
+  function startPractice(source: PracticeSource = practiceSource) {
+    const available =
       source === "favorites"
         ? stored.favorites
-        : allChords.slice(0, 10).map((chord) => snapshotFor(chord));
-    setPracticeItems(sourceItems.slice(0, 10));
+        : buildChords(stored.key, stored.mode, stored.preference, "In Scale").map((chord) => snapshotFor(chord));
+    const ordered =
+      practiceOrder === "Random"
+        ? [...available].sort(() => Math.random() - 0.5)
+        : available;
+    const sourceItems = ordered.slice(0, Math.min(10, ordered.length));
+    setPracticeSource(source);
+    setPracticeItems(sourceItems);
     setPracticeIndex(0);
     setPracticeSuccess(0);
     setPracticeErrors(0);
     setPracticeComplete(false);
     setSelectedNotes([]);
-    if (sourceItems.length) setStatus(`Practice started with ${Math.min(10, sourceItems.length)} items`);
+    if (sourceItems.length) setStatus(`Practice started with ${sourceItems.length} ${practiceOrder.toLowerCase()} items`);
+  }
+
+  function returnToPracticeSetup() {
+    setPracticeItems([]);
+    setPracticeIndex(0);
+    setPracticeSuccess(0);
+    setPracticeErrors(0);
+    setPracticeComplete(false);
+    setSelectedNotes([]);
+    setStatus("Practice setup");
   }
 
   useEffect(() => {
@@ -426,7 +504,7 @@ export default function ChordApp() {
 
         <section className="library-toolbar" aria-label="Chord filters">
           <div className="segmented">
-            {(["In Scale", "Neighbor Keys", "All Chords"] as ChordView[]).map((item) => (
+            {(["In Scale", "Neighbor Keys"] as ChordView[]).map((item) => (
               <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>
                 {item}
               </button>
@@ -447,12 +525,18 @@ export default function ChordApp() {
           <label>
             <span>Sort</span>
             <select value={sort} onChange={(event) => setSort(event.target.value)}>
+              <option>Learning Order</option>
               <option>Degree</option>
               <option>Name</option>
               <option>Complexity</option>
             </select>
           </label>
         </section>
+        <p className="view-explanation">
+          {view === "In Scale"
+            ? `Every displayed chord uses only notes from ${stored.key} ${stored.mode}.`
+            : `Optional discoveries from the two neighboring keys on the circle of fifths, clearly labeled by source.`}
+        </p>
 
         {query && displayedChords.length === 0 ? (
           <EmptyState title="No matching chord symbol" body="Try another root, family, or accidental spelling." />
@@ -485,6 +569,13 @@ export default function ChordApp() {
               );
             })}
           </section>
+        )}
+        {displayedChords.length < filteredChords.length && (
+          <div className="load-more">
+            <button onClick={() => setVisibleCount((count) => count + 36)}>
+              Load More · {filteredChords.length - displayedChords.length} Remaining
+            </button>
+          </div>
         )}
 
         {selectedChord && (
@@ -631,7 +722,10 @@ export default function ChordApp() {
             <h2>{practiceItems.length * 3} successful repetitions</h2>
             <div><strong>{practiceErrors}</strong><small>Total errors</small></div>
             <div><strong>{practiceItems.length}</strong><small>Completed items</small></div>
-            <button className="primary-button" onClick={() => startPractice(stored.favorites.length ? "favorites" : "scale")}>Practice Again</button>
+            <div className="button-row">
+              <button className="primary-button" onClick={() => startPractice()}>Practice Again</button>
+              <button onClick={returnToPracticeSetup}>Change Setup</button>
+            </div>
           </section>
         </>
       );
@@ -645,8 +739,12 @@ export default function ChordApp() {
               <p className="eyebrow">01 · Source</p>
               <h2>Choose material</h2>
               <div className="choice-grid">
-                <button className="selected">Current Scale<small>{stored.key} {stored.mode}</small></button>
-                <button onClick={() => startPractice("favorites")}>Favorites<small>{stored.favorites.length} available</small></button>
+                <button className={practiceSource === "scale" ? "selected" : ""} onClick={() => setPracticeSource("scale")}>
+                  Current Scale<small>{stored.key} {stored.mode}</small>
+                </button>
+                <button className={practiceSource === "favorites" ? "selected" : ""} onClick={() => setPracticeSource("favorites")} disabled={!stored.favorites.length}>
+                  Favorites<small>{stored.favorites.length} available</small>
+                </button>
                 <button>Current Family<small>{family}</small></button>
                 <button>Selected Voicings<small>Choose in Library</small></button>
               </div>
@@ -662,11 +760,28 @@ export default function ChordApp() {
                 ))}
               </div>
               <label className="check-label"><input type="checkbox" checked={hints} onChange={(event) => setHints(event.target.checked)} /> Visual Hints</label>
+              <p className="eyebrow practice-order-label">03 · Item Order</p>
+              <div className="segmented practice-order">
+                {(["Random", "Sequential"] as PracticeOrder[]).map((order) => (
+                  <button key={order} className={practiceOrder === order ? "active" : ""} onClick={() => setPracticeOrder(order)}>
+                    {order}
+                  </button>
+                ))}
+              </div>
             </div>
-            <button className="primary-button start-practice" onClick={() => startPractice("scale")}>Start Practice · 10 Items</button>
+            <button className="primary-button start-practice" onClick={() => startPractice()}>
+              Start Practice · {practiceOrder} · Up to 10 Items
+            </button>
           </section>
         ) : currentPracticeTarget ? (
           <section className="practice-stage">
+            <div className="practice-stage-actions">
+              <button onClick={returnToPracticeSetup}>← Back to Setup</button>
+              <label className="check-label">
+                <input type="checkbox" checked={hints} onChange={(event) => setHints(event.target.checked)} />
+                Visual Hints
+              </label>
+            </div>
             <div className="practice-progress">
               <span>Item {practiceIndex + 1}/{practiceItems.length}</span>
               <div><i style={{ width: `${((practiceIndex + practiceSuccess / 3) / practiceItems.length) * 100}%` }} /></div>
@@ -763,12 +878,28 @@ export default function ChordApp() {
             <button onClick={() => saveFileRef.current?.click()}>Import JSON</button>
           </article>
           <article>
-            <div><h2>Account</h2><p>Signed in as local-demo. Your data is isolated on the server.</p></div>
-            <button onClick={() => setStatus("Sign out is managed by the local host.")}>Sign Out</button>
+            <div><h2>Account</h2><p>Signed in as {authUser?.username}. Your data is isolated on the local server.</p></div>
+            <button onClick={() => void signOut()}>Sign Out</button>
           </article>
         </section>
       </>
     );
+  }
+
+  if (!authChecked) {
+    return (
+      <main className="auth-page">
+        <section className="auth-card">
+          <p className="eyebrow">Harmonic Practice</p>
+          <h1>Loading local session</h1>
+          <p>Connecting to the local server.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!authUser) {
+    return <LoginScreen canBootstrap={canBootstrap} onAuthenticated={finishAuthentication} />;
   }
 
   return (
@@ -783,10 +914,10 @@ export default function ChordApp() {
         <div className="global-controls">
           <label><span>Key</span><select value={stored.key} onChange={(event) => updateStored({ key: event.target.value })}>{ROOT_OPTIONS.map((root) => <option key={root}>{root}</option>)}</select></label>
           <label><span>Scale / Mode</span><select value={stored.mode} onChange={(event) => updateStored({ mode: event.target.value })}>{Object.keys(MODE_INTERVALS).map((mode) => <option key={mode}>{mode}</option>)}</select></label>
-          <label><span>Chord View</span><select value={view} onChange={(event) => setView(event.target.value as ChordView)}><option>In Scale</option><option>Neighbor Keys</option><option>All Chords</option></select></label>
+          <label><span>Chord View</span><select value={view} onChange={(event) => setView(event.target.value as ChordView)}><option>In Scale</option><option>Neighbor Keys</option></select></label>
         </div>
         <button className="midi-pill" onClick={connectMidi}><i /> MIDI · {midiState === "Not connected" ? "OFF" : "ON"}</button>
-        <button className="user-menu">AM <span>Alex Morgan</span></button>
+        <button className="user-menu" onClick={() => setPage("Settings")}>{authUser?.username.slice(0, 2).toUpperCase()} <span>{authUser?.username}</span></button>
       </header>
 
       <aside className="sidebar">
@@ -854,6 +985,84 @@ export default function ChordApp() {
         <span>Server sync · {hydrated ? "Ready" : "Loading"}</span>
       </div>
     </div>
+  );
+}
+
+function LoginScreen({
+  canBootstrap,
+  onAuthenticated,
+}: {
+  canBootstrap: boolean;
+  onAuthenticated: (user: AuthUser) => void;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch(canBootstrap ? "/api/auth/bootstrap" : "/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error ?? "Sign in failed.");
+        return;
+      }
+      onAuthenticated(data.user);
+    } catch {
+      setError("Cannot reach the local server.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="auth-page">
+      <section className="auth-card">
+        <p className="eyebrow">Harmonic Practice</p>
+        <h1>{canBootstrap ? "Create the first local account" : "Sign in"}</h1>
+        <p>
+          {canBootstrap
+            ? "This one-time setup is available only on localhost. There is no public registration."
+            : "Use an account created on this local host."}
+        </p>
+        <form onSubmit={(event) => void submit(event)}>
+          <label>
+            <span>Username</span>
+            <input
+              autoComplete="username"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              required
+              minLength={3}
+              maxLength={40}
+            />
+          </label>
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              autoComplete={canBootstrap ? "new-password" : "current-password"}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              minLength={10}
+            />
+          </label>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <button className="primary-button" type="submit" disabled={submitting}>
+            {submitting ? "Please Wait" : canBootstrap ? "Create Account" : "Sign In"}
+          </button>
+        </form>
+      </section>
+    </main>
   );
 }
 

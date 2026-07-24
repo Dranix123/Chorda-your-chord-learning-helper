@@ -93,6 +93,7 @@ input,
 select {
   color: inherit;
   font-size: inherit;
+  border-radius: 8px;
 }
 
 button {
@@ -113,6 +114,77 @@ select:focus-visible {
 
 .desktop-notice {
   display: none;
+}
+
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 48px;
+  background:
+    linear-gradient(rgba(15, 15, 15, 0.76), rgba(15, 15, 15, 0.9)),
+    url("/hero-bg.jpg") center / cover;
+  color: #ffffff;
+}
+
+.auth-card {
+  width: min(100%, 460px);
+  padding: 42px;
+  background: rgba(15, 15, 15, 0.94);
+  border: 1px solid #444444;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.auth-card h1 {
+  margin: 8px 0 10px;
+  font-size: 38px;
+  font-weight: normal;
+  line-height: 1.15;
+}
+
+.auth-card > p:not(.eyebrow) {
+  margin-bottom: 26px;
+  color: #cccccc;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-card label span {
+  color: #a0a0a0;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.auth-card input {
+  min-height: 46px;
+  padding: 0 13px;
+  background: transparent;
+  border: 1px solid #555555;
+  color: #ffffff;
+}
+
+.auth-card .primary-button {
+  min-height: 46px;
+  margin-top: 5px;
+}
+
+.auth-error {
+  color: #ffffff;
+  font-size: 13px;
+  font-style: italic;
 }
 
 .app-shell {
@@ -261,8 +333,9 @@ select:focus-visible {
   display: grid;
   grid-template-columns: 34px 1fr auto;
   align-items: center;
-  width: 100%;
+  width: calc(100% - 16px);
   min-height: 52px;
+  margin: 3px 8px;
   padding: 0 24px;
   background: transparent;
   border: 0;
@@ -271,6 +344,7 @@ select:focus-visible {
   font-size: 14px;
   letter-spacing: 0.4px;
   text-align: left;
+  border-radius: 8px;
   transition: all 200ms ease;
 }
 
@@ -385,6 +459,8 @@ main {
   display: flex;
   min-height: 44px;
   border: 1px solid var(--input-border);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .segmented button {
@@ -397,6 +473,7 @@ main {
   letter-spacing: 0.8px;
   text-transform: uppercase;
   white-space: nowrap;
+  border-radius: 0;
 }
 
 .segmented button:last-child {
@@ -422,14 +499,37 @@ main {
   padding: 0 12px;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
-  border-radius: 0;
   color: var(--input-text);
+}
+
+.view-explanation {
+  margin: -15px 0 24px;
+  color: var(--accent-color);
+  font-size: 12px;
+  font-style: italic;
 }
 
 .chord-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
   gap: 18px;
+}
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: 30px 0 4px;
+}
+
+.load-more button {
+  min-height: 44px;
+  padding: 0 22px;
+  background: transparent;
+  border: 1px solid var(--input-border);
+  color: var(--text-primary);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .chord-card {
@@ -618,6 +718,7 @@ main {
 .progression-section button,
 .settings-list button,
 .practice-stage button,
+.practice-result button,
 .empty-state button,
 .practice-setup button,
 .primary-button {
@@ -639,6 +740,7 @@ main {
 .progression-section button:hover,
 .settings-list button:hover,
 .practice-stage button:hover,
+.practice-result button:hover,
 .empty-state button:hover,
 .practice-setup button:hover {
   opacity: 0.7;
@@ -680,6 +782,7 @@ main {
   min-height: 330px;
   padding: 48px;
   border: 1px dashed var(--input-border);
+  border-radius: 8px;
   text-align: center;
 }
 
@@ -761,6 +864,7 @@ main {
   padding: 18px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
+  border-radius: 8px;
 }
 
 .transport > span {
@@ -817,6 +921,7 @@ main {
   padding: 28px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
+  border-radius: 8px;
 }
 
 .practice-setup h2 {
@@ -863,7 +968,16 @@ main {
   min-height: 48px !important;
 }
 
+.practice-order-label {
+  margin-top: 22px;
+}
+
+.practice-order {
+  margin-top: 8px;
+}
+
 .practice-stage {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -876,6 +990,27 @@ main {
   border: 1px solid var(--card-border);
   border-radius: 8px;
   text-align: center;
+}
+
+.practice-stage-actions {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  left: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.practice-stage-actions button {
+  min-height: 34px;
+}
+
+.practice-stage-actions .check-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .practice-progress {
@@ -937,6 +1072,7 @@ main {
   padding: 44px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
+  border-radius: 8px;
 }
 
 .practice-result > span {
@@ -956,6 +1092,13 @@ main {
   flex-direction: column;
   border-left: 1px solid var(--card-border);
   padding-left: 20px;
+}
+
+.practice-result .button-row {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  border-left: 0;
+  padding-left: 0;
 }
 
 .practice-result strong {
@@ -1026,6 +1169,7 @@ main {
 .inline-empty {
   padding: 30px;
   border: 1px dashed var(--input-border);
+  border-radius: 8px;
   color: var(--text-secondary);
   text-align: center;
 }

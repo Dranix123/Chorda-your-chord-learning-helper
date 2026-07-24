@@ -11,7 +11,9 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The local development database is a project-local D1/SQLite database managed by Miniflare. Saved favorites, voicings, Builder state, progressions, preferences, and imports are stored on the server, not in browser storage.
+Open `http://localhost:3000`. On the first run, create the first local account in the one-time setup screen. Later visits require that username and password; the product no longer enters through a default user.
+
+The local development database is a project-local D1/SQLite database managed by Miniflare. Accounts, sessions, favorites, voicings, Builder state, progressions, preferences, and imports are stored on the local server, not in browser storage.
 
 ## Verify
 
@@ -24,7 +26,9 @@ Tests cover server rendering, removal of starter artifacts, required style token
 
 ## Product features
 
-- Library views for In Scale, Neighbor Keys, and All Chords
+- Complete In Scale results plus clearly labeled Neighbor Keys discoveries
+- Learning-order results that show basic chords across every scale degree first
+- Continue-loading for large chord result sets
 - 12 roots and all V1 scale/mode formulas
 - Triad, sixth, seventh, extended, and added-tone chord families
 - Caslon-based dark/light editorial visual system
@@ -36,8 +40,10 @@ Tests cover server rendering, removal of starter artifacts, required style token
 - Progression templates and personal progressions
 - Versioned JSON data export/import
 
-## Data and identity
+## Local data and identity
 
-In a private Sites deployment, the authenticated workspace email is the server-side user key. Local development uses the isolated `local-demo` user. Every read and write derives identity on the server; the client does not submit a `userId`.
+The first account can only be created from localhost and only while the user table is empty. Passwords are stored as salted PBKDF2-SHA-256 hashes, and login uses an HttpOnly, SameSite session cookie. Every data read and write derives identity on the server; the client does not submit a `userId`.
 
-The checked-in migration is `drizzle/0000_user_states.sql`. The deployed application uses the logical `DB` binding declared in `.openai/hosting.json`.
+The checked-in migrations are `drizzle/0000_user_states.sql` and `drizzle/0001_local_auth.sql`.
+
+Cloudflare Tunnel is intentionally not configured by this repository. Configure it later against the local application when needed.

@@ -14,7 +14,13 @@ test("builds the finished chord-learning product", async () => {
   assert.match(product, /Progression Builder/);
   assert.match(product, /Practice Mode/);
   assert.match(product, /On-screen Piano/);
+  assert.match(product, /Create the first local account/);
+  assert.match(product, /Load More/);
+  assert.match(product, /Random/);
+  assert.match(product, /Sequential/);
+  assert.match(product, /Back to Setup/);
   assert.doesNotMatch(product, /codex-preview|Your site is taking shape|react-loading-skeleton/);
+  assert.doesNotMatch(client, /<option>All Chords<\/option>/);
 });
 
 test("uses the required local font and product metadata", async () => {
@@ -26,6 +32,7 @@ test("uses the required local font and product metadata", async () => {
   assert.match(css, /font-family:\s*"Caslon"/);
   assert.match(css, /--bg-color:\s*#0f0f0f/);
   assert.match(css, /grid-template:[\s\S]*240px/);
+  assert.match(css, /button,[\s\S]*border-radius:\s*8px/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
