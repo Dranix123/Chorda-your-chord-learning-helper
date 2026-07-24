@@ -1030,7 +1030,7 @@ function LoginScreen({
         <h1>{canBootstrap ? "Create the first local account" : "Sign in"}</h1>
         <p>
           {canBootstrap
-            ? "This one-time setup is available only on localhost. There is no public registration."
+            ? "This one-time setup is available only while no account exists. There is no public registration afterward."
             : "Use an account created on this local host."}
         </p>
         <form onSubmit={(event) => void submit(event)}>

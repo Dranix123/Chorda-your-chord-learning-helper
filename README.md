@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:1210`. On the first run, create the first local account in the one-time setup screen. Later visits require that username and password; the product no longer enters through a default user.
+Open `http://localhost:1211`. On the first run, create the first local account in the one-time setup screen. Later visits require that username and password; the product no longer enters through a default user.
 
 The local development database is a project-local D1/SQLite database managed by Miniflare. Accounts, sessions, favorites, voicings, Builder state, progressions, preferences, and imports are stored on the local server, not in browser storage.
 
@@ -42,7 +42,7 @@ Tests cover server rendering, removal of starter artifacts, required style token
 
 ## Local data and identity
 
-The first account can only be created from localhost and only while the user table is empty. Passwords are stored as salted PBKDF2-SHA-256 hashes, and login uses an HttpOnly, SameSite session cookie. Every data read and write derives identity on the server; the client does not submit a `userId`.
+The first account can only be created from localhost or the configured `chords.vulpolirant.com` host, and only while the user table is empty. Passwords are stored as salted PBKDF2-SHA-256 hashes, and login uses an HttpOnly, SameSite session cookie. Every data read and write derives identity on the server; the client does not submit a `userId`.
 
 The checked-in migrations are `drizzle/0000_user_states.sql` and `drizzle/0001_local_auth.sql`.
 

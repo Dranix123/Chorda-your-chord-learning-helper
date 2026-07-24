@@ -34,6 +34,10 @@
   --piano-black: #161616;
   --correct: #ffffff;
   --wrong: #777777;
+  --auth-bg: #000000;
+  --auth-fg: #ffffff;
+  --auth-muted: #cccccc;
+  --auth-border: #444444;
   --font-main: "Caslon", serif;
   color-scheme: dark;
 }
@@ -55,6 +59,10 @@
     --btn-bg: #1a1a1a;
     --btn-text: #ffffff;
     --btn-hover: #333333;
+    --auth-bg: #ffffff;
+    --auth-fg: #1a1a1a;
+    --auth-muted: #555555;
+    --auth-border: #cccccc;
     color-scheme: light;
   }
 }
@@ -122,19 +130,16 @@ select:focus-visible {
   justify-content: center;
   min-height: 100vh;
   padding: 48px;
-  background:
-    linear-gradient(rgba(15, 15, 15, 0.76), rgba(15, 15, 15, 0.9)),
-    url("/hero-bg.jpg") center / cover;
-  color: #ffffff;
+  background: var(--auth-bg);
+  color: var(--auth-fg);
 }
 
 .auth-card {
   width: min(100%, 460px);
   padding: 42px;
-  background: rgba(15, 15, 15, 0.94);
-  border: 1px solid #444444;
+  background: var(--auth-bg);
+  border: 1px solid var(--auth-border);
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
 .auth-card h1 {
@@ -146,7 +151,7 @@ select:focus-visible {
 
 .auth-card > p:not(.eyebrow) {
   margin-bottom: 26px;
-  color: #cccccc;
+  color: var(--auth-muted);
 }
 
 .auth-card form {
@@ -162,7 +167,7 @@ select:focus-visible {
 }
 
 .auth-card label span {
-  color: #a0a0a0;
+  color: var(--auth-muted);
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
@@ -172,8 +177,8 @@ select:focus-visible {
   min-height: 46px;
   padding: 0 13px;
   background: transparent;
-  border: 1px solid #555555;
-  color: #ffffff;
+  border: 1px solid var(--auth-border);
+  color: var(--auth-fg);
 }
 
 .auth-card .primary-button {
@@ -182,7 +187,7 @@ select:focus-visible {
 }
 
 .auth-error {
-  color: #ffffff;
+  color: var(--auth-fg);
   font-size: 13px;
   font-style: italic;
 }

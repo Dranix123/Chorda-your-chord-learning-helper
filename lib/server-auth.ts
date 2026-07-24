@@ -94,7 +94,10 @@ export async function hasLocalUsers(): Promise<boolean> {
 
 export function isLocalRequest(request: Request): boolean {
   const host = new URL(request.url).hostname;
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  return host === "localhost"
+    || host === "127.0.0.1"
+    || host === "::1"
+    || host === "chords.vulpolirant.com";
 }
 
 export async function hashPassword(password: string, salt?: Uint8Array) {

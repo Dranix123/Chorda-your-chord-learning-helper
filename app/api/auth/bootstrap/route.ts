@@ -9,7 +9,7 @@ import {
 
 export async function POST(request: Request) {
   if (!isLocalRequest(request)) {
-    return NextResponse.json({ error: "Initial account setup is available only on localhost." }, { status: 403 });
+    return NextResponse.json({ error: "Initial account setup is not available on this host." }, { status: 403 });
   }
   if (await hasLocalUsers()) {
     return NextResponse.json({ error: "Initial account setup is already complete." }, { status: 409 });
