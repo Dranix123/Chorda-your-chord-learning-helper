@@ -21,6 +21,8 @@ test("builds the finished chord-learning product", async () => {
   assert.match(product, /Save as New Voicing/);
   assert.match(product, /Skip/);
   assert.match(product, /Back to Setup/);
+  assert.match(client, /chords\.slice\(0,\s*6\)/);
+  assert.match(client, /choice-grid challenge-grid/);
   assert.doesNotMatch(product, /codex-preview|Your site is taking shape|react-loading-skeleton/);
   assert.doesNotMatch(client, /Current Family|Selected Voicings|Item Order|Sequential/);
   assert.doesNotMatch(client, /<option>All Chords<\/option>/);
@@ -36,7 +38,9 @@ test("uses the required local font and product metadata", async () => {
   assert.match(css, /--bg-color:\s*#0f0f0f/);
   assert.match(css, /grid-template:[\s\S]*240px/);
   assert.match(css, /button,[\s\S]*border-radius:\s*0/);
-  assert.match(css, /\.chord-card[\s\S]*border-radius:\s*8px/);
+  assert.match(css, /\.chord-card[\s\S]*min-height:\s*224px[\s\S]*border-radius:\s*8px/);
+  assert.match(css, /\.degree-chord-grid\.collapsed[\s\S]*repeat\(6,/);
+  assert.match(css, /\.challenge-grid[\s\S]*repeat\(3,/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });

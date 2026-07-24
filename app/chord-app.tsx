@@ -619,7 +619,7 @@ export default function ChordApp() {
           <section className="degree-groups" aria-label="Chord results by scale degree">
             {chordGroups.map(({ degree, chords }) => {
               const expanded = expandedDegrees.includes(degree) || Boolean(query);
-              const visible = expanded ? chords : chords.slice(0, 4);
+              const visible = expanded ? chords : chords.slice(0, 6);
               const roots = [...new Set(chords.map((chord) => chord.root))].join(" · ");
               return (
                 <section className="degree-row" key={degree}>
@@ -630,12 +630,12 @@ export default function ChordApp() {
                         degrees.includes(degree)
                           ? degrees.filter((item) => item !== degree)
                           : [...degrees, degree])}
-                      disabled={Boolean(query) || chords.length <= 4}
+                      disabled={Boolean(query) || chords.length <= 6}
                     >
-                      {query ? `Matches · ${chords.length}` : chords.length <= 4 ? "All Shown" : expanded ? "Collapse" : `Show All · ${chords.length}`}
+                      {query ? `Matches · ${chords.length}` : chords.length <= 6 ? "All Shown" : expanded ? "Collapse" : `Show All · ${chords.length}`}
                     </button>
                   </header>
-                  <div className="degree-chord-grid">
+                  <div className={`degree-chord-grid ${expanded ? "expanded" : "collapsed"}`}>
                     {visible.map(renderChordCard)}
                   </div>
                 </section>
@@ -843,7 +843,7 @@ export default function ChordApp() {
             <div>
               <p className="eyebrow">02 · Mode</p>
               <h2>Set the challenge</h2>
-              <div className="choice-grid">
+              <div className="choice-grid challenge-grid">
                 {(["Chord Learning", "Exact Voicing", "Hear"] as PracticeMode[]).map((mode) => (
                   <button key={mode} className={practiceMode === mode ? "selected" : ""} onClick={() => setPracticeMode(mode)}>
                     {mode}

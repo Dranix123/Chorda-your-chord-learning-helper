@@ -502,6 +502,7 @@ main {
   padding: 0 12px;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
+  border-radius: 8px;
   color: var(--input-text);
 }
 
@@ -544,8 +545,9 @@ main {
 .chord-page-actions button {
   min-height: 36px;
   padding: 0 13px;
-  background: transparent;
+  background: var(--card-bg);
   border: 1px solid var(--input-border);
+  border-radius: 8px;
   color: var(--text-secondary);
   font-size: 10px;
   letter-spacing: 1px;
@@ -554,13 +556,23 @@ main {
 
 .degree-chord-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 18px;
+}
+
+.degree-chord-grid.collapsed {
+  grid-template-columns: repeat(6, minmax(218px, 1fr));
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.degree-chord-grid.expanded {
+  grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
 }
 
 .chord-card {
   position: relative;
-  min-height: 168px;
+  min-height: 224px;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 8px;
@@ -579,8 +591,8 @@ main {
 .card-main {
   display: block;
   width: 100%;
-  min-height: 120px;
-  padding: 18px;
+  min-height: 172px;
+  padding: 20px 20px 15px;
   background: transparent;
   border: 0;
   color: var(--text-primary);
@@ -602,7 +614,7 @@ main {
 
 .card-family {
   display: block;
-  margin-top: 13px;
+  margin-top: 19px;
   color: var(--accent-color);
   font-size: 10px;
   letter-spacing: 1px;
@@ -612,7 +624,7 @@ main {
 .card-actions {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  min-height: 48px;
+  min-height: 52px;
   border-top: 1px solid var(--card-border);
 }
 
@@ -962,6 +974,15 @@ main {
   text-align: left;
 }
 
+.challenge-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.challenge-grid button {
+  min-height: 88px;
+  justify-content: space-between;
+}
+
 .choice-grid button.selected {
   background: var(--text-primary);
   border-color: var(--text-primary);
@@ -989,12 +1010,23 @@ main {
 }
 
 .number-field input {
-  width: 92px;
-  height: 40px;
-  padding: 0 10px;
+  width: 108px;
+  height: 44px;
+  padding: 0 12px;
   background: var(--input-bg);
   border: 1px solid var(--input-border);
+  border-radius: 8px;
   color: var(--input-text);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.number-field input::-webkit-inner-spin-button,
+.number-field input::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
 }
 
 .start-practice {
@@ -1005,11 +1037,10 @@ main {
 }
 
 .practice-stage {
-  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   max-width: 820px;
   min-height: 390px;
   margin: 0 auto;
@@ -1021,13 +1052,11 @@ main {
 }
 
 .practice-stage-actions {
-  position: absolute;
-  top: 18px;
-  right: 20px;
-  left: 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
+  margin-bottom: 38px;
 }
 
 .practice-stage-actions button {
@@ -1047,7 +1076,7 @@ main {
   gap: 14px;
   align-items: center;
   width: 100%;
-  margin-bottom: 48px;
+  margin-bottom: 42px;
   color: var(--accent-color);
   font-size: 11px;
   letter-spacing: 1px;
