@@ -19,12 +19,19 @@ test("builds the finished chord-learning product", async () => {
   assert.match(product, /Root Note/);
   assert.match(product, /Notes per Chord/);
   assert.match(product, /Save as New Voicing/);
+  assert.match(product, /Delete \$\{voicing\.name\}/);
   assert.match(product, /Skip/);
   assert.match(product, /Back to Setup/);
+  assert.match(product, />Back</);
+  assert.match(product, /Sound · \{stored\.instrument\}/);
+  assert.match(client, /instrument:\s*"Piano"/);
+  assert.match(client, /playProgression\(stored\.builder,\s*bpm,\s*stored\.instrument\)/);
   assert.match(client, /chords\.slice\(0,\s*6\)/);
   assert.match(client, /choice-grid challenge-grid/);
   assert.doesNotMatch(product, /codex-preview|Your site is taking shape|react-loading-skeleton/);
   assert.doesNotMatch(client, /Current Family|Selected Voicings|Item Order|Sequential/);
+  assert.doesNotMatch(client, />Change Setup</);
+  assert.doesNotMatch(client, /stored\.builder\.forEach\([\s\S]*setTimeout\(\(\) => playNotes/);
   assert.doesNotMatch(client, /<option>All Chords<\/option>/);
 });
 

@@ -298,6 +298,26 @@ export const PROGRESSION_TEMPLATES: Record<string, string[][]> = {
   ],
 };
 
+export function progressionChordForNumeral(chords: Chord[], numeral: string): Chord | undefined {
+  const degree = numeral.replace(/[^ivIV]/g, "").toUpperCase();
+  const candidates = chords.filter((chord) => chord.degree === degree && chord.family === "Triads");
+  const core = numeral.replace(/[^ivIV]/g, "");
+  const desiredIntervals = numeral.includes("°")
+    ? [0, 3, 6]
+    : core === core.toLowerCase()
+      ? [0, 3, 7]
+      : [0, 4, 7];
+  const isSameFormula = (chord: Chord, intervals: number[]) =>
+    chord.intervals.length === intervals.length
+    && chord.intervals.every((interval, index) => interval === intervals[index]);
+
+  return candidates.find((chord) => isSameFormula(chord, desiredIntervals))
+    ?? candidates.find((chord) =>
+      [[0, 4, 7], [0, 3, 7], [0, 3, 6]].some((intervals) => isSameFormula(chord, intervals)),
+    )
+    ?? candidates[0];
+}
+
 export function isPracticeMatch(
   pressed: number[],
   target: number[],

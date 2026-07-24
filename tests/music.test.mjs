@@ -6,6 +6,7 @@ import {
   invertVoicing,
   isPracticeMatch,
   matchesChordSearch,
+  progressionChordForNumeral,
   randomPracticeVoicing,
 } from "../lib/music.ts";
 
@@ -54,4 +55,12 @@ test("Hear voicings include every chord tone inside one three-octave window", ()
   assert.deepEqual([...new Set(voicing.map((note) => note % 12))].sort((a, b) => a - b), [0, 4, 7]);
   assert.ok(voicing.every((note) => note >= 24 && note <= 83));
   assert.ok(Math.floor(Math.max(...voicing) / 12) - Math.floor(Math.min(...voicing) / 12) <= 2);
+});
+
+test("progression numerals resolve to the matching scale degrees and triad qualities", () => {
+  const chords = buildChords("C", "Major", "contextual", "In Scale");
+  const symbols = ["I", "V", "vi", "IV"].map((numeral) =>
+    progressionChordForNumeral(chords, numeral)?.symbol,
+  );
+  assert.deepEqual(symbols, ["C", "G", "Am", "F"]);
 });
