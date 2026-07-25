@@ -3,9 +3,11 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("builds the finished chord-learning product", async () => {
-  const [page, client] = await Promise.all([
+  const [page, client, adminRoute, serverAuth] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chord-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/server-auth.ts", import.meta.url), "utf8"),
     access(new URL("../dist/server/index.js", import.meta.url)),
   ]);
   const product = `${page}\n${client}`;
@@ -31,6 +33,11 @@ test("builds the finished chord-learning product", async () => {
   assert.match(client, /startMidiNote\(audioContext,\s*data1,\s*data2,\s*instrumentRef\.current\)/);
   assert.match(client, /command === 0xb0 && data1 === 64/);
   assert.match(client, /await audioContext\.resume\(\)/);
+  assert.match(client, /User Management/);
+  assert.match(adminRoute, /requireAdministrator\(\)/);
+  assert.match(adminRoute, /Password must contain at least 10 characters/);
+  assert.match(serverAuth, /ORDER BY created_at ASC, id ASC LIMIT 1/);
+  assert.doesNotMatch(adminRoute, /password_hash|password_salt/);
   assert.match(client, /chords\.slice\(0,\s*6\)/);
   assert.match(client, /choice-grid challenge-grid/);
   assert.doesNotMatch(product, /codex-preview|Your site is taking shape|react-loading-skeleton/);
@@ -41,12 +48,13 @@ test("builds the finished chord-learning product", async () => {
 });
 
 test("uses the required local font and product metadata", async () => {
-  const [css, layout, packageJson, viteConfig, cacheScript] = await Promise.all([
+  const [css, layout, packageJson, viteConfig, cacheScript, addUserScript] = await Promise.all([
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../scripts/clear-dev-cache.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/add-user.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(css, /font-family:\s*"Caslon"/);
   assert.match(css, /--bg-color:\s*#0f0f0f/);
@@ -63,4 +71,8 @@ test("uses the required local font and product metadata", async () => {
   assert.match(viteConfig, /"Cache-Control":\s*"no-store"/);
   assert.match(cacheScript, /node_modules\/\.vite/);
   assert.doesNotMatch(cacheScript, /\.wrangler/);
+  assert.match(packageJson, /"user:add":\s*"node scripts\/add-user\.mjs"/);
+  assert.match(addUserScript, /PBKDF2/);
+  assert.match(addUserScript, /iterations:\s*210_000/);
+  assert.match(addUserScript, /password_hash/);
 });

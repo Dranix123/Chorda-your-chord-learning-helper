@@ -39,9 +39,12 @@ export type AuthUser = {
   id: string;
   username: string;
   source: "local" | "workspace";
+  isAdmin: boolean;
 };
 
 export class AuthenticationError extends Error {}
+export class AuthorizationError extends Error {}
+export class UsernameUnavailableError extends Error {}
 
 export async function database() {
   const binding = (env as unknown as { DB: D1Database }).DB;
@@ -59,7 +62,7 @@ export async function currentUser(): Promise<AuthUser | null> {
   if (workspaceEmail) {
     const encodedName = requestHeaders.get("oai-authenticated-user-full-name");
     const username = encodedName ? safeDecode(encodedName) ?? workspaceEmail : workspaceEmail;
-    return { id: `workspace:${workspaceEmail}`, username, source: "workspace" };
+    return { id: `workspace:${workspaceEmail}`, username, source: "workspace", isAdmin: false };
   }
 
   const cookieStore = await cookies();
@@ -77,13 +80,52 @@ export async function currentUser(): Promise<AuthUser | null> {
     )
     .bind(sessionId, now)
     .first<{ id: string; username: string }>();
-  return record ? { ...record, source: "local" } : null;
+  return record
+    ? { ...record, source: "local", isAdmin: await isLocalAdministrator(record.id) }
+    : null;
 }
 
 export async function requireUser(): Promise<AuthUser> {
   const user = await currentUser();
   if (!user) throw new AuthenticationError("Authentication required");
   return user;
+}
+
+export async function requireAdministrator(): Promise<AuthUser> {
+  const user = await requireUser();
+  if (!user.isAdmin) throw new AuthorizationError("Administrator access required");
+  return user;
+}
+
+export async function isLocalAdministrator(userId: string): Promise<boolean> {
+  const db = await database();
+  const firstUser = await db
+    .prepare("SELECT id FROM users ORDER BY created_at ASC, id ASC LIMIT 1")
+    .first<{ id: string }>();
+  return firstUser?.id === userId;
+}
+
+export async function createLocalUser(username: string, password: string): Promise<AuthUser> {
+  const db = await database();
+  const normalizedUsername = username.toLowerCase();
+  const existing = await db
+    .prepare("SELECT id FROM users WHERE username_normalized = ?")
+    .bind(normalizedUsername)
+    .first<{ id: string }>();
+  if (existing) throw new UsernameUnavailableError("Username already exists.");
+
+  const id = crypto.randomUUID();
+  const timestamp = new Date().toISOString();
+  const credentials = await hashPassword(password);
+  await db
+    .prepare(
+      `INSERT INTO users
+       (id, username, username_normalized, password_hash, password_salt, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+    )
+    .bind(id, username, normalizedUsername, credentials.hash, credentials.salt, timestamp, timestamp)
+    .run();
+  return { id, username, source: "local", isAdmin: await isLocalAdministrator(id) };
 }
 
 export async function hasLocalUsers(): Promise<boolean> {

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { createSession, database, verifyPassword } from "@/lib/server-auth";
+import {
+  createSession,
+  database,
+  isLocalAdministrator,
+  verifyPassword,
+} from "@/lib/server-auth";
 
 export async function POST(request: Request) {
   const body = (await request.json()) as { username?: string; password?: string };
@@ -25,5 +30,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid username or password." }, { status: 401 });
   }
   await createSession(user.id);
-  return NextResponse.json({ ok: true, user: { id: user.id, username: user.username, source: "local" } });
+  return NextResponse.json({
+    ok: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      source: "local",
+      isAdmin: await isLocalAdministrator(user.id),
+    },
+  });
 }

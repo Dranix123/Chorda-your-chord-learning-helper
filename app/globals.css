@@ -1293,6 +1293,62 @@ main {
   font-size: 12px;
 }
 
+.settings-list .admin-user-panel {
+  grid-template-columns: 1fr;
+}
+
+.admin-user-panel form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.admin-user-panel form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.admin-user-panel input {
+  height: 44px;
+  padding: 0 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  color: var(--input-text);
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-user-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+}
+
+.admin-user-list strong {
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.admin-user-list span {
+  color: var(--accent-color);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
 .piano-dock {
   grid-area: piano;
   position: relative;

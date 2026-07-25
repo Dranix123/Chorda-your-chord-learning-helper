@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import {
+  createLocalUser,
   createSession,
-  database,
   hasLocalUsers,
-  hashPassword,
   isLocalRequest,
 } from "@/lib/server-auth";
 
@@ -24,18 +23,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Password must contain at least 10 characters." }, { status: 400 });
   }
 
-  const db = await database();
-  const id = crypto.randomUUID();
-  const timestamp = new Date().toISOString();
-  const credentials = await hashPassword(password);
-  await db
-    .prepare(
-      `INSERT INTO users
-       (id, username, username_normalized, password_hash, password_salt, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-    )
-    .bind(id, username, username.toLowerCase(), credentials.hash, credentials.salt, timestamp, timestamp)
-    .run();
-  await createSession(id);
-  return NextResponse.json({ ok: true, user: { id, username, source: "local" } });
+  const user = await createLocalUser(username, password);
+  await createSession(user.id);
+  return NextResponse.json({ ok: true, user });
 }

@@ -26,6 +26,15 @@ type AuthUser = {
   id: string;
   username: string;
   source: "local" | "workspace";
+  isAdmin: boolean;
+};
+
+type ManagedUser = {
+  id: string;
+  username: string;
+  enabled: boolean;
+  createdAt: string;
+  isAdmin: boolean;
 };
 
 type ScheduledSound = {
@@ -357,6 +366,11 @@ export default function ChordApp() {
   const [practiceSkipped, setPracticeSkipped] = useState(0);
   const [practiceComplete, setPracticeComplete] = useState(false);
   const [instrumentMenuOpen, setInstrumentMenuOpen] = useState(false);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [newUsername, setNewUsername] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [userAdminStatus, setUserAdminStatus] = useState("");
+  const [creatingUser, setCreatingUser] = useState(false);
   const midiVoicesRef = useRef(new Map<number, ScheduledSound>());
   const midiHeldNotesRef = useRef(new Set<number>());
   const midiSustainedNotesRef = useRef(new Set<number>());
@@ -416,6 +430,23 @@ export default function ChordApp() {
     midiVoicesRef.current.forEach((voice) => voice.stop());
     midiVoicesRef.current.clear();
   }, []);
+
+  useEffect(() => {
+    if (page !== "Settings" || !authUser?.isAdmin) return;
+    let active = true;
+    void fetch("/api/admin/users")
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Could not load users.");
+        if (active) setManagedUsers(data.users);
+      })
+      .catch((error) => {
+        if (active) setUserAdminStatus(error instanceof Error ? error.message : "Could not load users.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [authUser?.isAdmin, page]);
 
   const allChords = useMemo(
     () => buildChords(stored.key, stored.mode, stored.preference, view),
@@ -736,6 +767,32 @@ export default function ChordApp() {
       setMidiState(`Connected: ${input.name ?? "MIDI input"}`);
     } catch {
       setMidiState("MIDI permission denied");
+    }
+  }
+
+  async function createManagedUser() {
+    if (!newUsername.trim() || !newUserPassword) return;
+    setCreatingUser(true);
+    setUserAdminStatus("");
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: newUsername.trim(), password: newUserPassword }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not create user.");
+      const usersResponse = await fetch("/api/admin/users");
+      const usersData = await usersResponse.json();
+      if (!usersResponse.ok) throw new Error(usersData.error ?? "Could not reload users.");
+      setManagedUsers(usersData.users);
+      setNewUsername("");
+      setNewUserPassword("");
+      setUserAdminStatus(`${data.user.username} created`);
+    } catch (error) {
+      setUserAdminStatus(error instanceof Error ? error.message : "Could not create user.");
+    } finally {
+      setCreatingUser(false);
     }
   }
 
@@ -1233,6 +1290,44 @@ export default function ChordApp() {
             <div><h2>Account</h2><p>Signed in as {authUser?.username}. Your data is isolated on the local server.</p></div>
             <button onClick={() => void signOut()}>Sign Out</button>
           </article>
+          {authUser?.isAdmin && (
+            <article className="admin-user-panel">
+              <div><h2>User Management</h2><p>Create accounts for this Chorda server.</p></div>
+              <form onSubmit={(event) => { event.preventDefault(); void createManagedUser(); }}>
+                <label>
+                  <span>Username</span>
+                  <input
+                    autoComplete="off"
+                    value={newUsername}
+                    onChange={(event) => setNewUsername(event.target.value)}
+                    placeholder="Username"
+                  />
+                </label>
+                <label>
+                  <span>Password</span>
+                  <input
+                    autoComplete="new-password"
+                    type="password"
+                    value={newUserPassword}
+                    onChange={(event) => setNewUserPassword(event.target.value)}
+                    placeholder="10 characters minimum"
+                  />
+                </label>
+                <button className="primary-button" disabled={creatingUser} type="submit">
+                  {creatingUser ? "Creating…" : "Add User"}
+                </button>
+              </form>
+              {userAdminStatus && <p className="setting-status">{userAdminStatus}</p>}
+              <div className="admin-user-list">
+                {managedUsers.map((user) => (
+                  <div key={user.id}>
+                    <strong>{user.username}</strong>
+                    <span>{user.isAdmin ? "Administrator" : user.enabled ? "Active" : "Disabled"}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          )}
         </section>
       </>
     );

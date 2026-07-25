@@ -15,6 +15,16 @@ Open `http://localhost:1211`. On the first run, create the first local account i
 
 The local development database is a project-local D1/SQLite database managed by Miniflare. Accounts, sessions, favorites, voicings, Builder state, progressions, preferences, and imports are stored on the local server, not in browser storage.
 
+Additional local users are created from the terminal after the app has run at
+least once:
+
+```bash
+npm run user:add -- Ariel
+```
+
+The command prompts for the password without displaying it. User records remain
+in the ignored local database and are never written to Git.
+
 ## Verify
 
 ```bash
