@@ -121,7 +121,16 @@ export function getFormulaCatalog(): ChordFormula[] {
       complexity: 3,
     })),
   );
-  return [...BASE_FORMULAS, ...added];
+  const signatures = new Set(BASE_FORMULAS.map((formula) => formula.intervals.join(",")));
+  return [
+    ...BASE_FORMULAS,
+    ...added.filter((formula) => {
+      const signature = formula.intervals.join(",");
+      if (signatures.has(signature)) return false;
+      signatures.add(signature);
+      return true;
+    }),
+  ];
 }
 
 export function rootPitchClass(root: string): number {
@@ -306,20 +315,46 @@ export const PROGRESSION_TEMPLATES: Record<string, string[][]> = {
     ["I", "IV", "V", "I"],
     ["vi", "IV", "I", "V"],
   ],
-  Minor: [
+  "Natural Minor": [
     ["i", "VI", "III", "VII"],
+    ["i", "iv", "v", "i"],
+    ["ii°", "v", "i"],
+    ["i", "VII", "VI", "VII"],
+    ["i", "VI", "iv", "v"],
+  ],
+  "Harmonic Minor": [
+    ["i", "VI", "III+", "vii°"],
     ["i", "iv", "V", "i"],
     ["ii°", "V", "i"],
-    ["i", "VII", "VI", "VII"],
+    ["i", "vii°", "VI", "vii°"],
     ["i", "VI", "iv", "V"],
+  ],
+  "Melodic Minor": [
+    ["i", "vi°", "III+", "vii°"],
+    ["i", "IV", "V", "i"],
+    ["ii", "V", "i"],
+    ["i", "vii°", "vi°", "vii°"],
+    ["i", "vi°", "IV", "V"],
   ],
   Dorian: [
     ["i", "IV", "i", "VII"],
     ["i", "ii", "IV", "i"],
   ],
+  Phrygian: [
+    ["i", "II", "i", "vii"],
+    ["i", "iv", "II", "i"],
+  ],
+  Lydian: [
+    ["I", "II", "I", "V"],
+    ["I", "vii", "II", "I"],
+  ],
   Mixolydian: [
     ["I", "♭VII", "IV", "I"],
     ["I", "v", "♭VII", "IV"],
+  ],
+  Locrian: [
+    ["i°", "II", "i°", "VI"],
+    ["i°", "iv", "II", "i°"],
   ],
 };
 
@@ -329,6 +364,8 @@ export function progressionChordForNumeral(chords: Chord[], numeral: string): Ch
   const core = numeral.replace(/[^ivIV]/g, "");
   const desiredIntervals = numeral.includes("°")
     ? [0, 3, 6]
+    : numeral.includes("+")
+      ? [0, 4, 8]
     : core === core.toLowerCase()
       ? [0, 3, 7]
       : [0, 4, 7];
@@ -336,11 +373,7 @@ export function progressionChordForNumeral(chords: Chord[], numeral: string): Ch
     chord.intervals.length === intervals.length
     && chord.intervals.every((interval, index) => interval === intervals[index]);
 
-  return candidates.find((chord) => isSameFormula(chord, desiredIntervals))
-    ?? candidates.find((chord) =>
-      [[0, 4, 7], [0, 3, 7], [0, 3, 6]].some((intervals) => isSameFormula(chord, intervals)),
-    )
-    ?? candidates[0];
+  return candidates.find((chord) => isSameFormula(chord, desiredIntervals));
 }
 
 export function isPracticeMatch(

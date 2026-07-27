@@ -29,7 +29,7 @@ test("builds the finished chord-learning product", async () => {
   assert.match(client, /addPianoSelectionToBuilder/);
   assert.match(client, /setVoicingBass/);
   assert.match(client, /instrument:\s*"Piano"/);
-  assert.match(client, /playProgression\(stored\.builder,\s*bpm,\s*stored\.instrument\)/);
+  assert.match(client, /function playBuilderProgression\(\)[\s\S]*playProgression\(stored\.builder,\s*bpm,\s*stored\.instrument,\s*\(\) => loopRef\.current\)/);
   assert.match(client, /startMidiNote\(audioContext,\s*data1,\s*data2,\s*instrumentRef\.current\)/);
   assert.match(client, /command === 0xb0 && data1 === 64/);
   assert.match(client, /await audioContext\.resume\(\)/);
@@ -44,6 +44,11 @@ test("builds the finished chord-learning product", async () => {
   assert.doesNotMatch(client, /Current Family|Selected Voicings|Item Order|Sequential/);
   assert.doesNotMatch(client, />Change Setup</);
   assert.doesNotMatch(client, /stored\.builder\.forEach\([\s\S]*setTimeout\(\(\) => playNotes/);
+  assert.match(client, /function stopProgressionPlayback\(\)/);
+  assert.match(client, /stopProgressionPlayback\(\);[\s\S]*new AudioContextClass\(\)/);
+  assert.match(client, /shouldLoop\(\)/);
+  assert.match(client, /\(\) => loopRef\.current/);
+  assert.match(client, /PROGRESSION_TEMPLATES\[stored\.mode\] \?\? \[\]/);
   assert.doesNotMatch(client, /<option>All Chords<\/option>/);
 });
 

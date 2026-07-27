@@ -278,8 +278,30 @@ function playNotes(notes: number[], duration = 1.5, instrument: Instrument = "Pi
   window.setTimeout(() => void context.close(), (duration + 0.2) * 1000);
 }
 
-function playProgression(items: Snapshot[], bpm: number, instrument: Instrument) {
+type ProgressionPlayback = {
+  context: AudioContext;
+  timer: number | null;
+};
+
+let activeProgressionPlayback: ProgressionPlayback | null = null;
+
+function stopProgressionPlayback() {
+  if (!activeProgressionPlayback) return;
+  if (activeProgressionPlayback.timer !== null) {
+    window.clearTimeout(activeProgressionPlayback.timer);
+  }
+  void activeProgressionPlayback.context.close();
+  activeProgressionPlayback = null;
+}
+
+function playProgression(
+  items: Snapshot[],
+  bpm: number,
+  instrument: Instrument,
+  shouldLoop: () => boolean = () => false,
+) {
   if (!items.length) return;
+  stopProgressionPlayback();
   const AudioContextClass = window.AudioContext ?? window.webkitAudioContext;
   if (!AudioContextClass) return;
   const context = new AudioContextClass();
@@ -287,12 +309,28 @@ function playProgression(items: Snapshot[], bpm: number, instrument: Instrument)
   master.connect(context.destination);
   const secondsPerChord = 240 / bpm;
   const chordDuration = Math.min(1.8, secondsPerChord * 0.9);
-  const startTime = context.currentTime + 0.05;
-  items.forEach((item, index) => {
-    scheduleNotes(context, master, item.notes, startTime + index * secondsPerChord, chordDuration, instrument);
-  });
-  const totalDuration = items.length * secondsPerChord + 0.3;
-  window.setTimeout(() => void context.close(), totalDuration * 1000);
+  const cycleDuration = items.length * secondsPerChord;
+  const playback: ProgressionPlayback = { context, timer: null };
+  activeProgressionPlayback = playback;
+
+  const scheduleCycle = () => {
+    if (activeProgressionPlayback !== playback) return;
+    const startTime = context.currentTime + 0.05;
+    items.forEach((item, index) => {
+      scheduleNotes(context, master, item.notes, startTime + index * secondsPerChord, chordDuration, instrument);
+    });
+    playback.timer = window.setTimeout(() => {
+      if (activeProgressionPlayback !== playback) return;
+      if (shouldLoop()) {
+        scheduleCycle();
+      } else {
+        activeProgressionPlayback = null;
+        void context.close();
+      }
+    }, (cycleDuration + 0.1) * 1000);
+  };
+
+  scheduleCycle();
 }
 
 let midiAudioContext: AudioContext | null = null;
@@ -376,6 +414,7 @@ export default function ChordApp() {
   const midiSustainedNotesRef = useRef(new Set<number>());
   const midiSustainRef = useRef(false);
   const instrumentRef = useRef<Instrument>(DEFAULT_STATE.instrument);
+  const loopRef = useRef(loop);
   const saveFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -426,10 +465,19 @@ export default function ChordApp() {
     instrumentRef.current = stored.instrument;
   }, [stored.instrument]);
 
+  useEffect(() => {
+    loopRef.current = loop;
+  }, [loop]);
+
   useEffect(() => () => {
     midiVoicesRef.current.forEach((voice) => voice.stop());
     midiVoicesRef.current.clear();
+    stopProgressionPlayback();
   }, []);
+
+  useEffect(() => {
+    if (page !== "Builder") stopProgressionPlayback();
+  }, [page]);
 
   useEffect(() => {
     if (page !== "Settings" || !authUser?.isAdmin) return;
@@ -811,6 +859,10 @@ export default function ChordApp() {
     setStatus("Progression saved");
   }
 
+  function playBuilderProgression() {
+    playProgression(stored.builder, bpm, stored.instrument, () => loopRef.current);
+  }
+
   function exportMyData() {
     const blob = new Blob([JSON.stringify({ schemaVersion: 1, ...stored }, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
@@ -1047,7 +1099,11 @@ export default function ChordApp() {
       <>
         <PageHeading eyebrow="Compose with exact voicings" title="Progression Builder" count={stored.builder.length} label="bars" />
         <section className="transport">
-          <button className="primary-button" disabled={!stored.builder.length} onClick={() => playProgression(stored.builder, bpm, stored.instrument)}>
+          <button
+            className="primary-button"
+            disabled={!stored.builder.length}
+            onClick={playBuilderProgression}
+          >
             Play All
           </button>
           <label>BPM <input type="number" min={40} max={240} value={bpm} onChange={(event) => setBpm(Math.max(40, Math.min(240, Number(event.target.value))))} /></label>
@@ -1210,15 +1266,14 @@ export default function ChordApp() {
   }
 
   function renderProgressions() {
-    const templateGroup = stored.mode.includes("Minor") ? "Minor" : PROGRESSION_TEMPLATES[stored.mode] ? stored.mode : "Major";
-    const templates = PROGRESSION_TEMPLATES[templateGroup] ?? PROGRESSION_TEMPLATES.Major;
+    const templates = PROGRESSION_TEMPLATES[stored.mode] ?? [];
     const scaleChords = buildChords(stored.key, stored.mode, stored.preference, "In Scale");
     return (
       <>
         <PageHeading eyebrow="Harmonic movement" title="Progressions" count={templates.length + stored.progressions.length} label="available" />
         <section className="progression-section">
           <div className="section-label"><span>Templates</span><small>Read-only · {stored.key} {stored.mode}</small></div>
-          <div className="progression-grid">
+          {templates.length ? <div className="progression-grid">
             {templates.map((numerals, index) => {
               const items = numerals.map((numeral) => {
                 const chord = progressionChordForNumeral(scaleChords, numeral);
@@ -1236,7 +1291,7 @@ export default function ChordApp() {
                 </article>
               );
             })}
-          </div>
+          </div> : <p className="inline-empty">No diatonic templates for this scale.</p>}
         </section>
         <section className="progression-section">
           <div className="section-label"><span>My Progressions</span><small>Saved from Builder</small></div>

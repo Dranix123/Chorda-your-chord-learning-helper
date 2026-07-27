@@ -7,6 +7,7 @@ import {
   invertVoicing,
   isPracticeMatch,
   matchesChordSearch,
+  PROGRESSION_TEMPLATES,
   progressionChordForNumeral,
   randomPracticeVoicing,
   setVoicingBass,
@@ -57,6 +58,15 @@ test("extended chords retain every stacked chord tone", () => {
   assert.deepEqual(cMajorEleven.notes, ["C", "E", "G", "B", "D", "F"]);
 });
 
+test("the chord catalog contains no exact duplicate formulas", () => {
+  const formulas = getFormulaCatalog();
+  const signatures = formulas.map((formula) => formula.intervals.join(","));
+  assert.equal(new Set(signatures).size, signatures.length);
+  for (const redundant of ["add6", "m(add6)", "sus2(add2)", "sus4(add4)"]) {
+    assert.equal(formulas.some((formula) => formula.suffix === redundant), false, `${redundant} is redundant`);
+  }
+});
+
 test("search accepts Unicode and ASCII accidentals", () => {
   const chord = buildChords("C♯/D♭", "Major", "sharps", "All Chords")
     .find((candidate) => candidate.symbol === "F♯maj7");
@@ -99,4 +109,23 @@ test("progression numerals resolve to the matching scale degrees and triad quali
     progressionChordForNumeral(chords, numeral)?.symbol,
   );
   assert.deepEqual(symbols, ["C", "G", "Am", "F"]);
+
+  for (const [mode, templates] of Object.entries(PROGRESSION_TEMPLATES)) {
+    const modeChords = buildChords("C", mode, "contextual", "In Scale");
+    for (const template of templates) {
+      for (const numeral of template) {
+        const chord = progressionChordForNumeral(modeChords, numeral);
+        assert.ok(chord, `${mode} ${numeral} does not resolve`);
+        const core = numeral.replace(/[^ivIV]/g, "");
+        const expected = numeral.includes("°")
+          ? [0, 3, 6]
+          : numeral.includes("+")
+            ? [0, 4, 8]
+            : core === core.toLowerCase()
+              ? [0, 3, 7]
+              : [0, 4, 7];
+        assert.deepEqual(chord.intervals, expected, `${mode} ${numeral} has the wrong quality`);
+      }
+    }
+  }
 });
