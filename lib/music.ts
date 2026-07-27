@@ -84,12 +84,12 @@ const BASE_FORMULAS: ChordFormula[] = [
   { suffix: "maj9", family: "Extended", intervals: [0, 4, 7, 11, 14], defining: [4, 11, 14], optional: [7], complexity: 3 },
   { suffix: "m9", family: "Extended", intervals: [0, 3, 7, 10, 14], defining: [3, 10, 14], optional: [7], complexity: 3 },
   { suffix: "mMaj9", family: "Extended", intervals: [0, 3, 7, 11, 14], defining: [3, 11, 14], optional: [7], complexity: 3 },
-  { suffix: "11", family: "Extended", intervals: [0, 4, 10, 14, 17], defining: [4, 10, 14, 17], optional: [7], complexity: 4 },
-  { suffix: "maj11", family: "Extended", intervals: [0, 4, 11, 14, 17], defining: [4, 11, 14, 17], optional: [7], complexity: 4 },
-  { suffix: "m11", family: "Extended", intervals: [0, 3, 10, 14, 17], defining: [3, 10, 14, 17], optional: [7], complexity: 4 },
-  { suffix: "13", family: "Extended", intervals: [0, 4, 10, 14, 21], defining: [4, 10, 14, 21], optional: [7], complexity: 5 },
-  { suffix: "maj13", family: "Extended", intervals: [0, 4, 11, 14, 21], defining: [4, 11, 14, 21], optional: [7], complexity: 5 },
-  { suffix: "m13", family: "Extended", intervals: [0, 3, 10, 14, 21], defining: [3, 10, 14, 21], optional: [7], complexity: 5 },
+  { suffix: "11", family: "Extended", intervals: [0, 4, 7, 10, 14, 17], defining: [4, 10, 14, 17], optional: [7], complexity: 4 },
+  { suffix: "maj11", family: "Extended", intervals: [0, 4, 7, 11, 14, 17], defining: [4, 11, 14, 17], optional: [7], complexity: 4 },
+  { suffix: "m11", family: "Extended", intervals: [0, 3, 7, 10, 14, 17], defining: [3, 10, 14, 17], optional: [7], complexity: 4 },
+  { suffix: "13", family: "Extended", intervals: [0, 4, 7, 10, 14, 17, 21], defining: [4, 10, 14, 17, 21], optional: [7], complexity: 5 },
+  { suffix: "maj13", family: "Extended", intervals: [0, 4, 7, 11, 14, 17, 21], defining: [4, 11, 14, 17, 21], optional: [7], complexity: 5 },
+  { suffix: "m13", family: "Extended", intervals: [0, 3, 7, 10, 14, 17, 21], defining: [3, 10, 14, 17, 21], optional: [7], complexity: 5 },
 ];
 
 const ADDED_BASES = [

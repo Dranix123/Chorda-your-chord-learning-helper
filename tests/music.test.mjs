@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildChords,
   defaultVoicing,
+  getFormulaCatalog,
   invertVoicing,
   isPracticeMatch,
   matchesChordSearch,
@@ -26,6 +27,34 @@ test("C major In Scale contains the seven required diatonic triads", () => {
 
 test("default C major voicing is C3 E3 G3", () => {
   assert.deepEqual(defaultVoicing(0, [0, 4, 7]), [48, 52, 55]);
+});
+
+test("extended chords retain every stacked chord tone", () => {
+  const formulas = new Map(
+    getFormulaCatalog()
+      .filter((formula) => formula.family === "Extended")
+      .map((formula) => [formula.suffix, formula.intervals]),
+  );
+  const expected = {
+    9: [0, 4, 7, 10, 14],
+    maj9: [0, 4, 7, 11, 14],
+    m9: [0, 3, 7, 10, 14],
+    mMaj9: [0, 3, 7, 11, 14],
+    11: [0, 4, 7, 10, 14, 17],
+    maj11: [0, 4, 7, 11, 14, 17],
+    m11: [0, 3, 7, 10, 14, 17],
+    13: [0, 4, 7, 10, 14, 17, 21],
+    maj13: [0, 4, 7, 11, 14, 17, 21],
+    m13: [0, 3, 7, 10, 14, 17, 21],
+  };
+  for (const [suffix, intervals] of Object.entries(expected)) {
+    assert.deepEqual(formulas.get(suffix), intervals, `${suffix} has an incomplete formula`);
+  }
+
+  const cMajorEleven = buildChords("C", "Major", "contextual", "All Chords")
+    .find((chord) => chord.symbol === "Cmaj11");
+  assert.ok(cMajorEleven);
+  assert.deepEqual(cMajorEleven.notes, ["C", "E", "G", "B", "D", "F"]);
 });
 
 test("search accepts Unicode and ASCII accidentals", () => {
