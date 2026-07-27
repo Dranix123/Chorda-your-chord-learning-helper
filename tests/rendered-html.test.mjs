@@ -68,6 +68,7 @@ test("uses the required local font and product metadata", async () => {
   assert.match(css, /\.chord-card[\s\S]*min-height:\s*224px[\s\S]*border-radius:\s*8px/);
   assert.match(css, /\.degree-chord-grid\.collapsed[\s\S]*repeat\(6,/);
   assert.match(css, /\.challenge-grid[\s\S]*repeat\(3,/);
+  assert.match(css, /\.piano button\.target::after[\s\S]*background:\s*#111[\s\S]*border:\s*2px solid #fff[\s\S]*box-shadow:\s*0 0 0 1px #111/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /"predev":\s*"node scripts\/clear-dev-cache\.mjs"/);

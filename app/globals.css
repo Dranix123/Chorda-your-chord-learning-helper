@@ -1446,7 +1446,9 @@ main {
 }
 
 .legend i.target {
-  border-style: dashed;
+  background: #111;
+  border-color: #fff;
+  box-shadow: 0 0 0 1px #111;
 }
 
 .legend i.pressed {
@@ -1518,10 +1520,12 @@ main {
   position: absolute;
   right: 50%;
   bottom: 12px;
-  width: 8px;
-  height: 8px;
-  border: 2px dashed #111;
+  width: 10px;
+  height: 10px;
+  background: #111;
+  border: 2px solid #fff;
   border-radius: 50%;
+  box-shadow: 0 0 0 1px #111;
   transform: translateX(50%);
 }
 
