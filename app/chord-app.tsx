@@ -21,7 +21,6 @@ import {
   normalizePitchTrainingState,
   pitchNameForMidi,
   type PitchCourseState,
-  type PitchName,
   type PitchTrainingState,
   type TrainingTimbre,
 } from "@/lib/pitch-training";
@@ -417,7 +416,7 @@ export default function ChordApp() {
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
   const [selectedNotes, setSelectedNotes] = useState<number[]>([]);
   const [pitchPianoAnswer, setPitchPianoAnswer] = useState<{ note: number; id: number } | null>(null);
-  const [pitchKeyHighlight, setPitchKeyHighlight] = useState<PitchName | null>(null);
+  const [pitchKeyHighlight, setPitchKeyHighlight] = useState<number | null>(null);
   const [status, setStatus] = useState("Ready");
   const [bpm, setBpm] = useState(120);
   const [loop, setLoop] = useState(false);
@@ -863,7 +862,6 @@ export default function ChordApp() {
         if (isNoteOn) {
           if (earAnsweringRef.current) {
             setPitchPianoAnswer((current) => ({ note: data1, id: (current?.id ?? 0) + 1 }));
-            return;
           }
           midiVoicesRef.current.get(data1)?.stop();
           midiVoicesRef.current.set(
@@ -1484,7 +1482,7 @@ export default function ChordApp() {
   }
 
   return (
-    <div className={`app-shell ${stored.pianoCollapsed && page !== "Ear Training" ? "piano-collapsed" : ""} ${page === "Sight Singing" ? "piano-hidden" : ""}`}>
+    <div className={`app-shell ${stored.pianoCollapsed ? "piano-collapsed" : ""} ${page === "Sight Singing" ? "piano-hidden" : ""}`}>
       <div className="desktop-notice">
         <span>Chorda</span>
         <h1>Desktop viewport required</h1>
@@ -1531,6 +1529,7 @@ export default function ChordApp() {
             onPlayTone={playPitchTone}
             onHighlightPitch={setPitchKeyHighlight}
             onStatus={setStatus}
+            selectedTimbre={stored.instrument}
           />
         )}
         {page === "Sight Singing" && (
@@ -1542,6 +1541,7 @@ export default function ChordApp() {
             onPlayTone={playPitchTone}
             onHighlightPitch={setPitchKeyHighlight}
             onStatus={setStatus}
+            selectedTimbre={stored.instrument}
           />
         )}
         {page === "Progressions" && renderProgressions()}
@@ -1552,16 +1552,10 @@ export default function ChordApp() {
         <div className="piano-toolbar">
           <div>
             <span>On-screen Piano</span>
-            <small>
-              {page === "Ear Training"
-                ? "Choose any octave of the pitch name you heard"
-                : selectedNotes.length
-                  ? selectedNotes.map((note) => midiNoteName(note, stored.preference)).join(" · ")
-                  : "Select notes or play a chord"}
-            </small>
+            <small>{selectedNotes.length ? selectedNotes.map((note) => midiNoteName(note, stored.preference)).join(" · ") : "Select notes or play a chord"}</small>
           </div>
-          {page !== "Ear Training" && <div className="legend"><span><i className="target" /> Target</span><span><i className="pressed" /> Selected</span><span><i className="active" /> Playing</span></div>}
-          {page !== "Ear Training" && <div className="instrument-picker">
+          <div className="legend"><span><i className="target" /> Target</span><span><i className="pressed" /> Selected</span><span><i className="active" /> Playing</span></div>
+          <div className="instrument-picker">
             <button
               aria-haspopup="menu"
               aria-expanded={instrumentMenuOpen}
@@ -1588,20 +1582,20 @@ export default function ChordApp() {
                 ))}
               </div>
             )}
-          </div>}
-          {page !== "Ear Training" && <button disabled={!selectedNotes.length} onClick={addPianoSelectionToBuilder}>＋ Builder</button>}
-          {page !== "Ear Training" && <button onClick={() => setSelectedNotes([])}>Clear</button>}
-          {page !== "Ear Training" && <button onClick={() => selectedNotes.length && playNotes(selectedNotes, 1.5, stored.instrument)}>Play Selection</button>}
-          {page !== "Ear Training" && <button onClick={() => updateStored({ pianoCollapsed: !stored.pianoCollapsed })}>{stored.pianoCollapsed ? "Expand" : "Collapse"}</button>}
+          </div>
+          <button disabled={!selectedNotes.length} onClick={addPianoSelectionToBuilder}>＋ Builder</button>
+          <button onClick={() => setSelectedNotes([])}>Clear</button>
+          <button onClick={() => selectedNotes.length && playNotes(selectedNotes, 1.5, stored.instrument)}>Play Selection</button>
+          <button onClick={() => updateStored({ pianoCollapsed: !stored.pianoCollapsed })}>{stored.pianoCollapsed ? "Expand" : "Collapse"}</button>
         </div>
-        {(!stored.pianoCollapsed || page === "Ear Training") && (
+        {!stored.pianoCollapsed && (
           <div className="piano-scroll">
             <div className="piano">
               {Array.from({ length: 88 }, (_, index) => index + 21).map((note) => {
                 const black = [1, 3, 6, 8, 10].includes(note % 12);
                 const earSession = stored.pitchTraining.ear.activeSession;
                 const isTarget = (page === "Practice" && hints && currentPracticeTarget?.notes.includes(note))
-                  || (page === "Ear Training" && pitchKeyHighlight === pitchNameForMidi(note));
+                  || (page === "Ear Training" && pitchKeyHighlight === note);
                 return (
                   <button
                     key={note}
@@ -1609,8 +1603,15 @@ export default function ChordApp() {
                     aria-label={midiNoteName(note, stored.preference)}
                     title={`${midiNoteName(note, stored.preference)} · MIDI ${note}`}
                     onClick={() => {
-                      if (page === "Ear Training" && earSession && earSession.stage !== "A") {
-                        setPitchPianoAnswer((current) => ({ note, id: (current?.id ?? 0) + 1 }));
+                      if (page === "Ear Training") {
+                        if (earSession && earSession.stage !== "A") {
+                          setPitchPianoAnswer((current) => ({ note, id: (current?.id ?? 0) + 1 }));
+                        }
+                        setActiveNotes((notes) => notes.includes(note) ? notes : [...notes, note]);
+                        playNotes([note], 0.7, stored.instrument);
+                        window.setTimeout(() => {
+                          setActiveNotes((notes) => notes.filter((value) => value !== note));
+                        }, 700);
                         return;
                       }
                       setSelectedNotes((notes) => notes.includes(note) ? notes.filter((value) => value !== note) : [...notes, note]);

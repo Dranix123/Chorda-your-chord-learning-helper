@@ -14,16 +14,16 @@ export const PITCH_NAMES = [
 ] as const;
 
 export const PITCH_LEARNING_ORDER = [
-  "F",
-  "E",
-  "F♯",
-  "E♭",
-  "G",
-  "D",
-  "A♭",
-  "C♯",
-  "A",
   "C",
+  "C♯",
+  "D",
+  "E♭",
+  "E",
+  "F",
+  "F♯",
+  "G",
+  "A♭",
+  "A",
   "B♭",
   "B",
 ] as const;
@@ -121,6 +121,11 @@ export type PitchCourseState = {
   learnedPitches: PitchName[];
   retainedPitches: PitchName[];
   representation: PitchRepresentation;
+  timed: boolean;
+  earFullKeyboardUnlocked: boolean;
+  vocalRangeLowMidi: number | null;
+  vocalRangeHighMidi: number | null;
+  vocalRangeTestedAt: string | null;
   pendingRetentionAt: string | null;
   retentionAttemptedAt: string | null;
   retentionRecoveryRequired: boolean;
@@ -189,6 +194,11 @@ function defaultCourse(representation: PitchRepresentation): PitchCourseState {
     learnedPitches: [],
     retainedPitches: [],
     representation,
+    timed: true,
+    earFullKeyboardUnlocked: false,
+    vocalRangeLowMidi: null,
+    vocalRangeHighMidi: null,
+    vocalRangeTestedAt: null,
     pendingRetentionAt: null,
     retentionAttemptedAt: null,
     retentionRecoveryRequired: false,
@@ -213,8 +223,12 @@ export function normalizePitchTrainingState(value: unknown): PitchTrainingState 
   const candidate = value && typeof value === "object"
     ? value as Partial<PitchTrainingState>
     : {};
+  const ear = normalizeCourse(candidate.ear, "note-name");
   return {
-    ear: normalizeCourse(candidate.ear, "note-name"),
+    ear: {
+      ...ear,
+      earFullKeyboardUnlocked: ear.earFullKeyboardUnlocked || ear.retainedPitches.length === PITCH_NAMES.length,
+    },
     sight: normalizeCourse(candidate.sight, "note-name"),
   };
 }
@@ -227,6 +241,10 @@ function normalizeCourse(value: unknown, representation: PitchRepresentation): P
   return {
     ...base,
     ...candidate,
+    earFullKeyboardUnlocked: candidate.earFullKeyboardUnlocked === true,
+    vocalRangeLowMidi: validMidi(candidate.vocalRangeLowMidi),
+    vocalRangeHighMidi: validMidi(candidate.vocalRangeHighMidi),
+    vocalRangeTestedAt: typeof candidate.vocalRangeTestedAt === "string" ? candidate.vocalRangeTestedAt : null,
     learnedPitches: validPitchArray(candidate.learnedPitches),
     retainedPitches: validPitchArray(candidate.retainedPitches),
     trainingDays: Array.isArray(candidate.trainingDays) ? candidate.trainingDays.filter((day): day is string => typeof day === "string") : [],
@@ -237,6 +255,12 @@ function normalizeCourse(value: unknown, representation: PitchRepresentation): P
     sessions: Array.isArray(candidate.sessions) ? candidate.sessions : [],
     activeSession: candidate.activeSession ?? null,
   };
+}
+
+function validMidi(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 21 && value <= 108
+    ? value
+    : null;
 }
 
 function validPitchArray(value: unknown): PitchName[] {
@@ -255,6 +279,42 @@ export function midiForPitch(pitch: PitchName, octave: number): number {
 
 export function samePitchName(firstMidi: number, secondMidi: number): boolean {
   return ((firstMidi - secondMidi) % 12 + 12) % 12 === 0;
+}
+
+export function isPitchAnswerCorrect(_module: PitchModule, answerMidi: number, targetMidi: number): boolean {
+  return answerMidi === targetMidi;
+}
+
+export function courseHasVocalRange(course: PitchCourseState): boolean {
+  return course.vocalRangeLowMidi !== null
+    && course.vocalRangeHighMidi !== null
+    && course.vocalRangeLowMidi < course.vocalRangeHighMidi;
+}
+
+export function pitchIsInVocalRange(course: PitchCourseState, pitch: PitchName): boolean {
+  if (!courseHasVocalRange(course)) return false;
+  for (let midi = course.vocalRangeLowMidi as number; midi <= (course.vocalRangeHighMidi as number); midi += 1) {
+    if (pitchNameForMidi(midi) === pitch) return true;
+  }
+  return false;
+}
+
+export function firstPitchInVocalRange(course: PitchCourseState): PitchName | null {
+  return PITCH_LEARNING_ORDER.find((pitch) => pitchIsInVocalRange(course, pitch)) ?? null;
+}
+
+export function completedEarMidiNotes(course: PitchCourseState): number[] {
+  return [...new Set(course.records
+    .filter((response) =>
+      response.module === "ear"
+      && response.correct
+      && response.valid
+      && !response.assisted
+      && !response.deviceError,
+    )
+    .map((response) => midiForPitch(response.target, response.octave))
+    .filter((midi) => midi >= 21 && midi <= 108))]
+    .sort((first, second) => first - second);
 }
 
 export function autocorrelatedFrequency(buffer: Float32Array, sampleRate: number): number | null {
@@ -371,6 +431,7 @@ export function beginPitchSession(
   now = new Date(),
   random: () => number = Math.random,
 ): PitchCourseState {
+  if (module === "sight" && !courseHasVocalRange(course)) return course;
   if (kind === "certification" && !canStartCertification(course, now)) return course;
   if (kind === "retention" && !retentionIsAvailable(course, now)) return course;
   const day = localDay(now);
@@ -385,6 +446,23 @@ export function beginPitchSession(
       : course.certificationAttempts,
     retentionAttemptedAt: kind === "retention" ? now.toISOString() : course.retentionAttemptedAt,
     activeSession: createPitchSession(module, kind, course, now, random),
+  };
+}
+
+export function skipPitchBaseline(course: PitchCourseState, module: PitchModule = "ear"): PitchCourseState {
+  if (module === "sight" && !courseHasVocalRange(course)) return course;
+  const firstPitch = module === "sight"
+    ? firstPitchInVocalRange(course) ?? PITCH_LEARNING_ORDER[0]
+    : PITCH_LEARNING_ORDER[0];
+  return {
+    ...course,
+    started: true,
+    introCompleted: true,
+    baselineCompleted: true,
+    stage: "A",
+    currentPitch: firstPitch,
+    learnedPitches: course.learnedPitches.length ? course.learnedPitches : [firstPitch],
+    activeSession: null,
   };
 }
 
@@ -403,110 +481,282 @@ function questionsForSession(
   course: PitchCourseState,
   random: () => number,
 ): PitchQuestion[] {
+  if (
+    module === "ear"
+    && course.earFullKeyboardUnlocked
+    && kind !== "baseline"
+    && kind !== "stage-a"
+  ) {
+    return fullKeyboardQuestions(course, kind === "weekly" ? 88 : 72, random);
+  }
   if (kind === "baseline") {
     return module === "ear"
       ? exactGrid(PITCH_NAMES, OCTAVES, TIMBRES, random)
-      : balancedQuestions(PITCH_NAMES, 36, ["Piano"], random);
+      : sightQuestions(PITCH_NAMES, 36, course, random);
   }
   if (kind === "weekly") {
     return module === "ear"
       ? exactGrid(PITCH_NAMES, OCTAVES, TIMBRES, random)
-      : balancedQuestions(PITCH_NAMES, 36, ["Piano"], random);
+      : sightQuestions(PITCH_NAMES, 36, course, random);
   }
 
-  const current = course.currentPitch ?? "F";
-  const learned = uniquePitches([...course.learnedPitches, current]);
+  const current = module === "sight"
+    ? course.currentPitch && pitchIsInVocalRange(course, course.currentPitch)
+      ? course.currentPitch
+      : firstPitchInVocalRange(course) ?? PITCH_LEARNING_ORDER[0]
+    : course.currentPitch ?? PITCH_LEARNING_ORDER[0];
+  const learned = uniquePitches([...course.learnedPitches, current])
+    .filter((pitch) => module === "ear" || pitchIsInVocalRange(course, pitch));
   if (kind === "stage-a") {
-    return OCTAVES.flatMap((octave) => [0, 1].map(() => question(current, octave, "Piano")));
+    return module === "sight"
+      ? weightedSightQuestions(current, learned, 6, course, random, 0.5)
+      : weightedEarQuestions(current, learned, 6, ["Piano"], random, 0.5);
   }
   if (stage === "B") {
-    if (module === "sight") return balancedQuestions([current], 24, ["Piano"], random);
-    const pitchClass = PITCH_CLASS[current];
-    const neighbors = PITCH_NAMES.filter((pitch) => {
-      const distance = Math.abs(PITCH_CLASS[pitch] - pitchClass);
-      return distance === 1 || distance === 2 || distance === 10 || distance === 11;
-    });
-    const distractor = shuffled(neighbors, random)[0] ?? PITCH_LEARNING_ORDER.find((pitch) => pitch !== current) ?? "E";
-    return balancedQuestions([current, distractor], 36, ["Piano"], random);
+    if (module === "sight") {
+      const count = Math.max(24, Math.min(60, learned.length * 5));
+      return weightedSightQuestions(current, learned, count, course, random);
+    }
+    const count = Math.max(36, Math.min(72, learned.length * 6));
+    return weightedEarQuestions(current, learned, count, ["Piano"], random);
   }
   if (module === "ear" && stage === "C") {
     const maximum = 72;
     const count = Math.max(36, Math.min(maximum, learned.length * 7));
-    const neighbor = nearestUnlearnedPitch(current, learned);
-    const weakest = weakestLearnedPitch(course.records, learned) ?? current;
-    const base = balancedQuestions(learned, learned.length * 6, ["Piano"], random);
-    const neighborCount = neighbor ? Math.min(6, count - base.length) : 0;
-    const weaknessCount = Math.max(0, count - base.length - neighborCount);
-    const pool = [
-      ...base,
-      ...(weaknessCount ? balancedQuestions([weakest], weaknessCount, ["Piano"], random) : []),
-      ...(neighbor && neighborCount ? balancedQuestions([neighbor], neighborCount, ["Piano"], random) : []),
-    ];
-    return arrangeQuestions(pool, random);
+    return weightedEarQuestions(current, learned, count, ["Piano"], random);
   }
   if (kind === "certification" || kind === "retention") {
     const perPitch = module === "ear" ? 6 : 4;
     const minimum = module === "ear" ? 36 : 24;
     const maximum = module === "ear" ? 72 : 60;
     const count = Math.max(minimum, Math.min(maximum, learned.length * perPitch));
-    return balancedQuestions(learned, count, module === "ear" ? ["Piano", "Electric Piano"] : ["Piano"], random);
+    return module === "sight"
+      ? weightedSightQuestions(current, learned, count, course, random)
+      : weightedEarQuestions(current, learned, count, ["Piano", "Electric Piano"], random);
   }
-  const maximum = module === "ear" ? 72 : 60;
+  const maximum = 72;
   const count = Math.max(36, Math.min(maximum, learned.length * 6));
   if (module === "sight" && stage === "C") {
-    const weakest = weakestLearnedPitch(course.records, learned) ?? current;
-    const base = balancedQuestions(learned, learned.length * 6, ["Piano"], random);
-    return arrangeQuestions([
-      ...base,
-      ...balancedQuestions([weakest], Math.max(0, count - base.length), ["Piano"], random),
-    ], random);
+    return weightedSightQuestions(current, learned, count, course, random);
   }
-  return balancedQuestions(
+  if (module === "sight") return weightedSightQuestions(current, learned, count, course, random);
+  return weightedEarQuestions(
+    current,
     learned,
     count,
-    module === "ear" && stage === "D" ? ["Piano", "Electric Piano"] : ["Piano"],
+    stage === "D" ? ["Piano", "Electric Piano"] : ["Piano"],
     random,
   );
 }
 
-function weakestLearnedPitch(records: PitchResponse[], learned: PitchName[]): PitchName | null {
-  return learned
-    .map((pitch) => {
-      const items = records.filter((record) =>
-        record.target === pitch
-        && !record.assisted
-        && !record.deviceError,
-      );
-      return {
-        pitch,
-        attempts: items.length,
-        accuracy: ratio(items.filter((record) => record.correct).length, items.length),
-      };
-    })
-    .filter((item) => item.attempts > 0)
-    .sort((first, second) =>
-      first.accuracy - second.accuracy
-      || second.attempts - first.attempts
-      || PITCH_LEARNING_ORDER.indexOf(first.pitch) - PITCH_LEARNING_ORDER.indexOf(second.pitch),
-    )[0]?.pitch ?? null;
+function weightedEarQuestions(
+  current: PitchName,
+  learned: PitchName[],
+  count: number,
+  timbres: TrainingTimbre[],
+  random: () => number,
+  currentRatio = 0.4,
+): PitchQuestion[] {
+  const anchors = OCTAVES.map((octave) => midiForPitch(current, octave));
+  return weightedAbsoluteQuestions(
+    current,
+    learned,
+    count,
+    timbres,
+    random,
+    anchors,
+    21,
+    108,
+    currentRatio,
+  );
 }
 
-function nearestUnlearnedPitch(current: PitchName, learned: PitchName[]): PitchName | null {
+function weightedSightQuestions(
+  current: PitchName,
+  learned: PitchName[],
+  count: number,
+  course: PitchCourseState,
+  random: () => number,
+  currentRatio = 0.4,
+): PitchQuestion[] {
+  const low = course.vocalRangeLowMidi ?? midiForPitch("C", 3);
+  const high = course.vocalRangeHighMidi ?? midiForPitch("B", 5);
+  const anchors = midiNotesForPitch(current, low, high);
+  return weightedAbsoluteQuestions(
+    current,
+    learned,
+    count,
+    ["Piano"],
+    random,
+    anchors,
+    low,
+    high,
+    currentRatio,
+  );
+}
+
+function weightedAbsoluteQuestions(
+  current: PitchName,
+  learned: PitchName[],
+  count: number,
+  timbres: TrainingTimbre[],
+  random: () => number,
+  anchors: number[],
+  low: number,
+  high: number,
+  currentRatio: number,
+): PitchQuestion[] {
+  const mixed = reviewPitchPool(
+    current,
+    learned,
+    random,
+    (pitch) => midiNotesForPitch(pitch, low, high).length > 0,
+  ).map((pitch) => ({
+    pitch,
+    notes: absoluteReviewMidis(current, pitch, anchors, low, high),
+  })).filter((entry) => entry.notes.length);
+  const currentCount = weightedCurrentCount(count, mixed.length, currentRatio);
+  const shuffledAnchors = shuffled(anchors, random);
+  const currentQuestions = Array.from({ length: currentCount }, (_, index) =>
+    questionForMidi(
+      shuffledAnchors[index % shuffledAnchors.length],
+      timbres[index % timbres.length],
+    ));
+  const reviewOrder = shuffled(mixed, random);
+  const reviewQuestions = Array.from({ length: count - currentCount }, (_, index) => {
+    const entry = reviewOrder[index % reviewOrder.length];
+    const cycle = Math.floor(index / reviewOrder.length);
+    return questionForMidi(
+      entry.notes[cycle % entry.notes.length],
+      timbres[index % timbres.length],
+    );
+  });
+  return arrangeQuestions([...currentQuestions, ...reviewQuestions], random);
+}
+
+function absoluteReviewMidis(
+  current: PitchName,
+  review: PitchName,
+  anchors: number[],
+  low: number,
+  high: number,
+): number[] {
+  const pitchClassDistance = Math.abs(PITCH_CLASS[current] - PITCH_CLASS[review]);
+  const wrappedDistance = Math.min(pitchClassDistance, 12 - pitchClassDistance);
+  if (wrappedDistance === 1 || wrappedDistance === 2) {
+    return [...new Set(anchors.flatMap((anchor) =>
+      [-2, -1, 1, 2]
+        .map((offset) => anchor + offset)
+        .filter((midi) =>
+          midi >= low
+          && midi <= high
+          && pitchNameForMidi(midi) === review,
+        ),
+    ))];
+  }
+  return [...new Set(anchors.map((anchor) =>
+    nearestMidiForPitch(review, anchor, low, high),
+  ).filter((midi): midi is number => midi !== null))];
+}
+
+function nearestMidiForPitch(
+  pitch: PitchName,
+  anchor: number,
+  low: number,
+  high: number,
+): number | null {
+  return midiNotesForPitch(pitch, low, high)
+    .sort((first, second) =>
+      Math.abs(first - anchor) - Math.abs(second - anchor)
+      || first - second,
+    )[0] ?? null;
+}
+
+function midiNotesForPitch(pitch: PitchName, low: number, high: number): number[] {
+  return Array.from({ length: Math.max(0, high - low + 1) }, (_, index) => low + index)
+    .filter((midi) => pitchNameForMidi(midi) === pitch);
+}
+
+function reviewPitchPool(
+  current: PitchName,
+  learned: PitchName[],
+  random: () => number,
+  allowed: (pitch: PitchName) => boolean = () => true,
+): PitchName[] {
   const currentClass = PITCH_CLASS[current];
-  return [...PITCH_NAMES]
-    .filter((pitch) => !learned.includes(pitch))
-    .sort((first, second) => {
-      const firstDistance = Math.min(
-        Math.abs(PITCH_CLASS[first] - currentClass),
-        12 - Math.abs(PITCH_CLASS[first] - currentClass),
-      );
-      const secondDistance = Math.min(
-        Math.abs(PITCH_CLASS[second] - currentClass),
-        12 - Math.abs(PITCH_CLASS[second] - currentClass),
-      );
-      return firstDistance - secondDistance
-        || PITCH_LEARNING_ORDER.indexOf(first) - PITCH_LEARNING_ORDER.indexOf(second);
-    })[0] ?? null;
+  const neighbors = PITCH_NAMES.filter((pitch) => {
+    const distance = Math.abs(PITCH_CLASS[pitch] - currentClass);
+    const wrappedDistance = Math.min(distance, 12 - distance);
+    return pitch !== current
+      && allowed(pitch)
+      && (wrappedDistance === 1 || wrappedDistance === 2);
+  });
+  const learnedReview = learned.filter((pitch) => pitch !== current && allowed(pitch));
+  const newNeighbors = shuffled(
+    neighbors.filter((pitch) => !learnedReview.includes(pitch)),
+    random,
+  ).slice(0, 2);
+  return uniquePitches([
+    ...learnedReview,
+    ...newNeighbors,
+  ]);
+}
+
+function weightedCurrentCount(
+  count: number,
+  reviewPitchCount: number,
+  currentRatio: number,
+): number {
+  const minimumPerReviewPitch = count >= 36 ? 5 : 1;
+  const canReserveReviewMinimum = count >= reviewPitchCount * minimumPerReviewPitch + 6;
+  const maximumCurrentCount = canReserveReviewMinimum
+    ? count - reviewPitchCount * minimumPerReviewPitch
+    : count - 1;
+  return Math.max(
+    1,
+    Math.min(count - 1, maximumCurrentCount, Math.round(count * currentRatio)),
+  );
+}
+
+function fullKeyboardQuestions(
+  course: PitchCourseState,
+  count: number,
+  random: () => number,
+): PitchQuestion[] {
+  const allNotes = Array.from({ length: 88 }, (_, index) => index + 21);
+  const completed = new Set(completedEarMidiNotes(course));
+  const incomplete = shuffled(allNotes.filter((midi) => !completed.has(midi)), random);
+  const repeats = shuffled(allNotes, random);
+  const selected = [...incomplete.slice(0, count)];
+  let repeatIndex = 0;
+  while (selected.length < count) {
+    selected.push(repeats[repeatIndex % repeats.length]);
+    repeatIndex += 1;
+  }
+  return arrangeQuestions(selected.map((midi) => questionForMidi(midi, "Piano")), random);
+}
+
+function sightQuestions(
+  names: readonly PitchName[],
+  count: number,
+  course: PitchCourseState,
+  random: () => number,
+): PitchQuestion[] {
+  const low = course.vocalRangeLowMidi ?? midiForPitch("C", 3);
+  const high = course.vocalRangeHighMidi ?? midiForPitch("B", 5);
+  const candidates = names.map((target) => ({
+    target,
+    notes: midiNotesForPitch(target, low, high),
+  })).filter((entry) => entry.notes.length);
+  if (!candidates.length || count <= 0) return [];
+  const order = shuffled(candidates, random);
+  const pool = Array.from({ length: count }, (_, index) => {
+    const entry = order[index % order.length];
+    const cycle = Math.floor(index / order.length);
+    const midi = entry.notes[cycle % entry.notes.length];
+    return questionForMidi(midi, "Piano");
+  });
+  return arrangeQuestions(pool, random);
 }
 
 function exactGrid(
@@ -543,6 +793,16 @@ function question(target: PitchName, octave: number, timbre: TrainingTimbre): Pi
     target,
     octave,
     midi: midiForPitch(target, octave),
+    timbre,
+  };
+}
+
+function questionForMidi(midi: number, timbre: TrainingTimbre): PitchQuestion {
+  return {
+    id: crypto.randomUUID(),
+    target: pitchNameForMidi(midi),
+    octave: Math.floor(midi / 12) - 1,
+    midi,
     timbre,
   };
 }
@@ -595,7 +855,12 @@ export function completePitchSession(
   };
 
   if (session.kind === "baseline") {
-    const firstPitch = selectFirstTrainingPitch(session.responses);
+    const selected = session.module === "ear"
+      ? PITCH_LEARNING_ORDER[0]
+      : selectFirstTrainingPitch(session.responses);
+    const firstPitch = session.module === "sight" && !pitchIsInVocalRange(next, selected)
+      ? firstPitchInVocalRange(next) ?? selected
+      : selected;
     return {
       ...next,
       started: true,
@@ -616,6 +881,14 @@ export function completePitchSession(
         retentionRecoveryBlocks: blocks,
         pendingRetentionAt: blocks >= 2 ? now.toISOString() : next.pendingRetentionAt,
         retentionAttemptedAt: blocks >= 2 ? null : next.retentionAttemptedAt,
+      };
+    }
+    if (session.module === "ear" && next.earFullKeyboardUnlocked) {
+      const keyboardComplete = completedEarMidiNotes(next).length === 88;
+      return {
+        ...next,
+        stage: keyboardComplete ? "E" : "C",
+        consolidationBlocks: summary.passed ? next.consolidationBlocks + 1 : next.consolidationBlocks,
       };
     }
     if (summary.passed) {
@@ -669,13 +942,17 @@ export function completePitchSession(
       ...next.retainedPitches,
       ...(next.currentPitch ? [next.currentPitch] : []),
     ]);
-    const nextPitch = nextLearningPitch(retained);
+    const nextPitch = nextLearningPitch(retained, session.module, next);
+    const unlockFullKeyboard = session.module === "ear"
+      && !nextPitch
+      && !next.earFullKeyboardUnlocked;
     return {
       ...next,
+      earFullKeyboardUnlocked: next.earFullKeyboardUnlocked || unlockFullKeyboard,
       retainedPitches: retained,
       learnedPitches: nextPitch ? uniquePitches([...next.learnedPitches, nextPitch]) : next.learnedPitches,
       currentPitch: nextPitch ?? next.currentPitch,
-      stage: nextPitch ? "A" : "E",
+      stage: nextPitch ? "A" : unlockFullKeyboard ? "C" : "E",
       pendingRetentionAt: null,
       retentionAttemptedAt: null,
       retentionRecoveryRequired: false,
@@ -686,9 +963,16 @@ export function completePitchSession(
   return next;
 }
 
-function nextLearningPitch(retained: PitchName[]): PitchName | null {
+function nextLearningPitch(
+  retained: PitchName[],
+  module: PitchModule,
+  course: PitchCourseState,
+): PitchName | null {
   return PITCH_LEARNING_ORDER
-    .filter((pitch) => !retained.includes(pitch))
+    .filter((pitch) =>
+      !retained.includes(pitch)
+      && (module === "ear" || pitchIsInVocalRange(course, pitch)),
+    )
     .sort((first, second) => {
       const distanceToRetained = (pitch: PitchName) => retained.length
         ? Math.min(...retained.map((known) => {
@@ -815,7 +1099,7 @@ function selectFirstTrainingPitch(responses: PitchResponse[]): PitchName {
     second.correct - first.correct
     || first.median - second.median
     || PITCH_LEARNING_ORDER.indexOf(first.pitch) - PITCH_LEARNING_ORDER.indexOf(second.pitch),
-  )[0]?.pitch ?? "F";
+  )[0]?.pitch ?? PITCH_LEARNING_ORDER[0];
 }
 
 export function pitchStats(records: PitchResponse[]): PitchStats {

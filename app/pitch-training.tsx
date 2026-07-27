@@ -8,16 +8,21 @@ import {
   beginPitchSession,
   canStartCertification,
   completePitchSession,
+  completedEarMidiNotes,
+  courseHasVocalRange,
+  firstPitchInVocalRange,
+  isPitchAnswerCorrect,
   isFormalSession,
   midiForPitch,
   pitchNameForMidi,
+  pitchIsInVocalRange,
   pitchStats,
   pitchTrainingCsv,
   type PitchName,
   retentionIsAvailable,
   sessionAllowsReplay,
   sessionAllowsRetry,
-  sessionShowsImmediateFeedback,
+  skipPitchBaseline,
   summarizePitchSession,
   weeklyIsDue,
   type PitchCourseState,
@@ -30,6 +35,9 @@ import {
 
 type PianoAnswer = { note: number; id: number } | null;
 type MicrophoneState = "idle" | "requesting" | "listening" | "stable" | "denied" | "error";
+type MicrophoneMode = "answer" | "range-low" | "range-high";
+type VocalRangeStep = "idle" | "low" | "high";
+type SightRecording = { midi: number; cents: number } | null;
 type Feedback = {
   correct: boolean;
   target: string;
@@ -46,15 +54,16 @@ type Props = {
   pianoAnswer: PianoAnswer;
   onChange: (course: PitchCourseState) => void;
   onPlayTone: (note: number, timbre: TrainingTimbre, duration: number) => boolean;
-  onHighlightPitch: (pitch: PitchName | null) => void;
+  onHighlightPitch: (midi: number | null) => void;
   onStatus: (message: string) => void;
+  selectedTimbre: TrainingTimbre;
 };
 
 const MODULE_COPY = {
   ear: {
     eyebrow: "Pitch course · listening",
     title: "Single-note Ear Training",
-    intro: "Hear one isolated note, then identify its pitch name on the existing piano. Any octave of the same pitch name is accepted.",
+    intro: "Hear one isolated note, then identify its exact pitch and octave on the existing piano.",
   },
   sight: {
     eyebrow: "Pitch course · voice",
@@ -81,6 +90,7 @@ export default function PitchTraining({
   onPlayTone,
   onHighlightPitch,
   onStatus,
+  selectedTimbre,
 }: Props) {
   const copy = MODULE_COPY[module];
   const [view, setView] = useState<"course" | "report" | "settings">("course");
@@ -90,6 +100,9 @@ export default function PitchTraining({
   const [extraDemos, setExtraDemos] = useState(0);
   const [microphoneState, setMicrophoneState] = useState<MicrophoneState>("idle");
   const [microphoneMessage, setMicrophoneMessage] = useState("Microphone not checked");
+  const [vocalRangeStep, setVocalRangeStep] = useState<VocalRangeStep>("idle");
+  const [rangeDraftLow, setRangeDraftLow] = useState<number | null>(null);
+  const [sightRecording, setSightRecording] = useState<SightRecording>(null);
   const [masking, setMasking] = useState(false);
   const [completedSessionId, setCompletedSessionId] = useState<string | null>(null);
   const microphoneStopRef = useRef<(() => void) | null>(null);
@@ -101,6 +114,8 @@ export default function PitchTraining({
   const answeringRef = useRef(false);
   const session = course.activeSession;
   const question = session?.questions[session.index];
+  const currentTimbre = selectedTimbre;
+  const hasVocalRange = courseHasVocalRange(course);
   const learnedCount = Math.max(1, course.learnedPitches.length);
   const formal = session ? isFormalSession(session.kind) : false;
   const timeLimit = session ? answerTimeLimitMs(module, session.stage, learnedCount) : 0;
@@ -111,7 +126,7 @@ export default function PitchTraining({
     setMicrophoneState((current) => current === "denied" ? current : "idle");
   }, []);
 
-  const startMicrophone = useCallback(async (checkOnly = false) => {
+  const startMicrophone = useCallback(async (mode: MicrophoneMode = "answer") => {
     stopMicrophone();
     if (!navigator.mediaDevices?.getUserMedia) {
       setMicrophoneState("error");
@@ -160,7 +175,13 @@ export default function PitchTraining({
         };
       });
       setMicrophoneState("listening");
-      setMicrophoneMessage(checkOnly ? "Sing one comfortable, steady note." : "Listening for one stable note…");
+      setMicrophoneMessage(
+        mode === "range-low"
+          ? "Sing and hold your lowest comfortable note."
+          : mode === "range-high"
+            ? "Sing and hold your highest comfortable note."
+            : "Listening for one stable note…",
+      );
 
       const analyse = () => {
         if (stopped) return;
@@ -188,13 +209,46 @@ export default function PitchTraining({
             : [exactMidi];
           if (stableSamples.length >= 8 && spread(stableSamples) < 0.28) {
             setMicrophoneState("stable");
-            if (checkOnly) {
-              setMicrophoneMessage("Stable single-note input received. Exact pitch is hidden during setup.");
-              onChange({ ...course, microphoneCheckCompleted: true });
+            if (mode === "range-low") {
+              setRangeDraftLow(roundedMidi);
+              setVocalRangeStep("high");
+              setMicrophoneMessage(`Lowest comfortable note captured: ${midiLabel(roundedMidi)}. Now capture your highest note.`);
               stop();
               microphoneStopRef.current = null;
+            } else if (mode === "range-high") {
+              if (rangeDraftLow === null || roundedMidi <= rangeDraftLow) {
+                setMicrophoneState("listening");
+                setMicrophoneMessage("The highest note must be above the captured lowest note. Try again.");
+              } else {
+                const rangedCourse: PitchCourseState = {
+                  ...course,
+                  microphoneCheckCompleted: true,
+                  vocalRangeLowMidi: rangeDraftLow,
+                  vocalRangeHighMidi: roundedMidi,
+                  vocalRangeTestedAt: new Date().toISOString(),
+                  activeSession: null,
+                };
+                const nextCurrentPitch = rangedCourse.currentPitch
+                  && pitchIsInVocalRange(rangedCourse, rangedCourse.currentPitch)
+                  ? rangedCourse.currentPitch
+                  : firstPitchInVocalRange(rangedCourse);
+                onChange({
+                  ...rangedCourse,
+                  currentPitch: rangedCourse.baselineCompleted ? nextCurrentPitch : rangedCourse.currentPitch,
+                  learnedPitches: rangedCourse.baselineCompleted && nextCurrentPitch
+                    ? [...new Set([...rangedCourse.learnedPitches, nextCurrentPitch])]
+                    : rangedCourse.learnedPitches,
+                });
+                setVocalRangeStep("idle");
+                setRangeDraftLow(null);
+                setMicrophoneMessage(`Vocal range saved: ${midiLabel(rangeDraftLow)}–${midiLabel(roundedMidi)}.`);
+                stop();
+                microphoneStopRef.current = null;
+              }
             } else {
               stablePitchCallbackRef.current({ midi: roundedMidi, cents });
+              stop();
+              microphoneStopRef.current = null;
             }
             stableSamples = [];
           }
@@ -212,7 +266,7 @@ export default function PitchTraining({
         ? "Microphone access was denied. Allow it in browser settings, then try again."
         : "The microphone could not be started. Check the selected input device.");
     }
-  }, [course, onChange, stopMicrophone]);
+  }, [course, onChange, rangeDraftLow, stopMicrophone]);
 
   useEffect(() => () => {
     stopMicrophone();
@@ -229,12 +283,12 @@ export default function PitchTraining({
       return;
     }
     const needsReferenceDelay = session.stage === "B" || session.retryUsed;
-    const preparation = window.setTimeout(() => void startMicrophone(false), needsReferenceDelay ? 1_050 : 500);
+    const preparation = window.setTimeout(() => void startMicrophone("answer"), needsReferenceDelay ? 1_050 : 500);
     return () => window.clearTimeout(preparation);
   }, [feedback, module, session?.id, session?.index, session?.stage, startMicrophone, stopMicrophone]);
 
   useEffect(() => {
-    if (!session || !question || session.stage === "A") return;
+    if (!course.timed || !session || !question || session.stage === "A") return;
     const update = () => {
       const elapsed = Date.now() - new Date(session.questionStartedAt).getTime();
       setRemainingMs(Math.max(0, timeLimit - elapsed));
@@ -242,7 +296,7 @@ export default function PitchTraining({
     update();
     const timer = window.setInterval(update, 100);
     return () => window.clearInterval(timer);
-  }, [question?.id, session?.id, session?.questionStartedAt, session?.stage, timeLimit]);
+  }, [course.timed, question?.id, session?.id, session?.questionStartedAt, session?.stage, timeLimit]);
 
   const submitResponse = useCallback((response: PitchResponse) => {
     if (!session || answeringRef.current) return;
@@ -258,8 +312,12 @@ export default function PitchTraining({
     const recentBatch = nextSession.responses.filter((item) => !item.deviceError).slice(-6);
     const nextFeedback: Feedback = {
       correct: response.correct,
-      target: response.target,
-      answer: response.selectedPitch ?? response.detectedPitch ?? "No stable note",
+      target: `${response.target}${response.octave}`,
+      answer: response.selectedMidi !== undefined
+        ? midiLabel(response.selectedMidi)
+        : response.detectedMidi !== undefined
+          ? midiLabel(response.detectedMidi)
+          : response.selectedPitch ?? response.detectedPitch ?? "No stable note",
       direction: response.detectedMidi === undefined
         ? undefined
         : pitchDirection(response.detectedMidi, question?.midi ?? response.detectedMidi, response.cents ?? 0),
@@ -271,41 +329,66 @@ export default function PitchTraining({
     };
     stopMicrophone();
 
-    const advance = () => {
-      answeringRef.current = false;
-      setFeedback(null);
-      if (session.index >= session.questions.length - 1) {
-        const completed = completePitchSession(course, nextSession);
-        onChange(completed);
-        const result = completed.sessions.at(-1);
-        setCompletedSessionId(result?.id ?? null);
-        onStatus(result?.passed === true ? "Stage passed" : result?.passed === false ? "Stage needs another pass" : "Session complete");
-        return;
-      }
-      onChange({
-        ...course,
-        activeSession: {
-          ...nextSession,
-          index: session.index + 1,
-          questionStartedAt: new Date().toISOString(),
-          replayUsed: false,
-          retryUsed: false,
-          deviceRetryUsed: false,
-        },
-      });
-    };
+    setFeedback(nextFeedback);
+    onChange({ ...course, activeSession: nextSession });
+    answeringRef.current = false;
+  }, [course, module, onChange, onStatus, question?.midi, session, stopMicrophone]);
 
-    if (response.deviceError || showBatchFeedback || sessionShowsImmediateFeedback(session)) {
-      setFeedback(nextFeedback);
-      if (!nextFeedback.retryAvailable) window.setTimeout(advance, 850);
-      else {
-        onChange({ ...course, activeSession: nextSession });
-        answeringRef.current = false;
-      }
-    } else {
-      advance();
+  const submitSightRecording = useCallback((timedOut = false) => {
+    if (module !== "sight" || !session || !question || feedback) return;
+    const detected = sightRecording;
+    submitResponse({
+      id: crypto.randomUUID(),
+      sessionId: session.id,
+      module,
+      kind: session.kind,
+      stage: session.stage,
+      target: question.target,
+      octave: question.octave,
+      timbre: currentTimbre,
+      representation: session.representation,
+      detectedPitch: detected ? pitchNameForMidi(detected.midi) : undefined,
+      detectedMidi: detected?.midi,
+      cents: detected ? centsFromTarget(detected.midi, detected.cents, question.midi) : undefined,
+      valid: Boolean(detected),
+      correct: detected ? isPitchAnswerCorrect(module, detected.midi, question.midi) : false,
+      octaveCorrect: detected ? Math.floor(detected.midi / 12) - 1 === question.octave : undefined,
+      timeout: timedOut && !detected,
+      assisted: session.retryUsed,
+      replayed: false,
+      deviceError: false,
+      responseMs: timedOut
+        ? timeLimit
+        : Date.now() - new Date(session.questionStartedAt).getTime(),
+      createdAt: new Date().toISOString(),
+    });
+  }, [currentTimbre, feedback, module, question, session, sightRecording, submitResponse, timeLimit]);
+
+  function advanceAfterFeedback() {
+    if (!session || !feedback) return;
+    answeringRef.current = false;
+    setFeedback(null);
+    setSightRecording(null);
+    if (session.index >= session.questions.length - 1) {
+      const completed = completePitchSession(course, session);
+      onChange(completed);
+      const result = completed.sessions.at(-1);
+      setCompletedSessionId(result?.id ?? null);
+      onStatus(result?.passed === true ? "Stage passed" : result?.passed === false ? "Stage needs another pass" : "Session complete");
+      return;
     }
-  }, [course, onChange, onStatus, question?.midi, session, stopMicrophone]);
+    onChange({
+      ...course,
+      activeSession: {
+        ...session,
+        index: session.index + 1,
+        questionStartedAt: new Date().toISOString(),
+        replayUsed: false,
+        retryUsed: false,
+        deviceRetryUsed: false,
+      },
+    });
+  }
 
   useEffect(() => {
     if (
@@ -317,22 +400,27 @@ export default function PitchTraining({
       || answeringRef.current
       || (microphoneState !== "denied" && microphoneState !== "error")
     ) return;
-    submitResponse(responseForDeviceError(session, question));
-  }, [feedback, microphoneState, module, question, session, submitResponse]);
+    submitResponse(responseForDeviceError(session, question, currentTimbre));
+  }, [currentTimbre, feedback, microphoneState, module, question, session, submitResponse]);
 
   useEffect(() => {
     const elapsed = session ? Date.now() - new Date(session.questionStartedAt).getTime() : 0;
-    if (!session || !question || session.stage === "A" || feedback || remainingMs > 0 || elapsed < timeLimit || answeringRef.current) return;
-    const response = responseForTimeout(session, question);
+    if (!course.timed || !session || !question || session.stage === "A" || feedback || remainingMs > 0 || elapsed < timeLimit || answeringRef.current) return;
+    if (module === "sight") {
+      submitSightRecording(true);
+      return;
+    }
+    const response = responseForTimeout(session, question, currentTimbre);
     submitResponse(response);
-  }, [feedback, question, remainingMs, session, submitResponse, timeLimit]);
+  }, [course.timed, currentTimbre, feedback, module, question, remainingMs, session, submitResponse, submitSightRecording, timeLimit]);
 
   useEffect(() => {
-    if (module !== "ear" || !pianoAnswer || !session || !question || session.stage === "A" || feedback) return;
+    if (module !== "ear" || !pianoAnswer) return;
     if (pianoAnswer.id === handledPianoAnswerRef.current) return;
     handledPianoAnswerRef.current = pianoAnswer.id;
+    if (!session || !question || session.stage === "A" || feedback) return;
     const selectedPitch = pitchNameForMidi(pianoAnswer.note);
-    submitResponse({
+    const response: PitchResponse = {
       id: crypto.randomUUID(),
       sessionId: session.id,
       module,
@@ -340,67 +428,50 @@ export default function PitchTraining({
       stage: session.stage,
       target: question.target,
       octave: question.octave,
-      timbre: question.timbre,
+      timbre: currentTimbre,
       representation: session.representation,
       selectedPitch,
       selectedMidi: pianoAnswer.note,
       valid: true,
-      correct: selectedPitch === question.target,
+      correct: isPitchAnswerCorrect(module, pianoAnswer.note, question.midi),
       octaveCorrect: Math.floor(pianoAnswer.note / 12) - 1 === question.octave,
       timeout: false,
-      assisted: session.replayUsed,
+      assisted: course.timed && session.replayUsed,
       replayed: session.replayUsed,
       deviceError: false,
       responseMs: Date.now() - new Date(session.questionStartedAt).getTime(),
       createdAt: new Date().toISOString(),
-    });
-  }, [feedback, module, pianoAnswer, question, session, submitResponse]);
+    };
+    const timer = window.setTimeout(() => submitResponse(response), 0);
+    return () => window.clearTimeout(timer);
+  }, [course.timed, currentTimbre, feedback, module, pianoAnswer, question, session, submitResponse]);
 
   useEffect(() => {
     stablePitchCallbackRef.current = (detected) => {
       if (module !== "sight" || !session || !question || feedback) return;
-      const detectedPitch = pitchNameForMidi(detected.midi);
-      submitResponse({
-        id: crypto.randomUUID(),
-        sessionId: session.id,
-        module,
-        kind: session.kind,
-        stage: session.stage,
-        target: question.target,
-        octave: question.octave,
-        timbre: question.timbre,
-        representation: session.representation,
-        detectedPitch,
-        detectedMidi: detected.midi,
-        cents: centsFromTarget(detected.midi, detected.cents, question.midi),
-        valid: true,
-        correct: detectedPitch === question.target,
-        octaveCorrect: Math.floor(detected.midi / 12) - 1 === question.octave,
-        timeout: false,
-        assisted: session.retryUsed,
-        replayed: false,
-        deviceError: false,
-        responseMs: Date.now() - new Date(session.questionStartedAt).getTime(),
-        createdAt: new Date().toISOString(),
-      });
+      setSightRecording(detected);
+      setMicrophoneMessage(`Stable recording captured: ${midiLabel(detected.midi)}.`);
     };
-  }, [feedback, module, question, session, submitResponse]);
+  }, [feedback, module, question, session]);
 
   useEffect(() => {
+    const freshQuestion = session
+      ? session.responses.length === session.index && !session.replayUsed
+      : false;
     if (
       module !== "ear"
       || !session
       || !question
       || session.stage === "A"
-      || (session.responses.length !== session.index && !session.deviceRetryUsed)
+      || (!freshQuestion && !session.deviceRetryUsed)
     ) return;
     const timer = window.setTimeout(() => {
-      if (!onPlayTone(question.midi, question.timbre, 0.8)) {
-        submitResponse(responseForDeviceError(session, question));
+      if (!onPlayTone(question.midi, currentTimbre, 0.8)) {
+        submitResponse(responseForDeviceError(session, question, currentTimbre));
       }
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [module, onPlayTone, question, session, submitResponse]);
+  }, [currentTimbre, module, onPlayTone, question, session, submitResponse]);
 
   useEffect(() => {
     if (module !== "sight" || !session || !question || session.stage === "A") return;
@@ -411,19 +482,39 @@ export default function PitchTraining({
     const deviceStageBReference = session.stage === "B" && session.deviceRetryUsed;
     if (!initialStageBReference && !deviceStageBReference && !session.retryUsed) return;
     const timer = window.setTimeout(() => {
-      if (!onPlayTone(question.midi, question.timbre, 0.8)) {
-        submitResponse(responseForDeviceError(session, question));
+      if (!onPlayTone(question.midi, currentTimbre, 0.8)) {
+        submitResponse(responseForDeviceError(session, question, currentTimbre));
       }
     }, 120);
     return () => window.clearTimeout(timer);
-  }, [module, onPlayTone, question, session, submitResponse]);
+  }, [currentTimbre, module, onPlayTone, question, session, submitResponse]);
 
   function updateCourse(patch: Partial<PitchCourseState>) {
     onChange({ ...course, ...patch });
   }
 
-  function start(kind: PitchSessionKind) {
+  function beginVocalRangeTest() {
+    stopMicrophone();
+    setRangeDraftLow(null);
+    setVocalRangeStep("low");
+    void startMicrophone("range-low");
+  }
+
+  function captureVocalRangeHigh() {
+    if (rangeDraftLow === null) {
+      beginVocalRangeTest();
+      return;
+    }
+    void startMicrophone("range-high");
+  }
+
+  function start(kind: PitchSessionKind, practicePitch?: PitchName) {
+    if (module === "sight" && !hasVocalRange) {
+      onStatus("Complete the vocal range test before starting Sight Singing");
+      return;
+    }
     setFeedback(null);
+    setSightRecording(null);
     setCompletedSessionId(null);
     setStageADemos(0);
     setExtraDemos(0);
@@ -444,22 +535,50 @@ export default function PitchTraining({
       }, 10_000);
       return;
     }
-    onChange(beginPitchSession(module, kind, course));
+    const practiceCourse = practicePitch
+      ? {
+          ...course,
+          currentPitch: practicePitch,
+          learnedPitches: [...new Set([...course.learnedPitches, practicePitch])],
+          earFullKeyboardUnlocked: module === "ear" ? false : course.earFullKeyboardUnlocked,
+        }
+      : course;
+    const started = beginPitchSession(module, kind, practiceCourse);
+    onChange(practicePitch
+      ? {
+          ...started,
+          currentPitch: course.currentPitch,
+          learnedPitches: course.learnedPitches,
+          earFullKeyboardUnlocked: course.earFullKeyboardUnlocked,
+        }
+      : started);
+  }
+
+  function skipBaseline() {
+    if (module === "sight" && !hasVocalRange) {
+      onStatus("The first vocal range test cannot be skipped");
+      return;
+    }
+    setFeedback(null);
+    setCompletedSessionId(null);
+    const skipped = skipPitchBaseline(course, module);
+    onChange(skipped);
+    onStatus(`Baseline skipped · course starts with ${skipped.currentPitch ?? "C"}`);
   }
 
   function playStageADemo() {
     if (!session || !question) return;
-    if (!onPlayTone(question.midi, question.timbre, 0.8)) {
+    if (!onPlayTone(question.midi, currentTimbre, 0.8)) {
       onStatus("Audio output is unavailable");
       return;
     }
     if (module === "ear") {
-      onHighlightPitch(question.target);
+      onHighlightPitch(question.midi);
       if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
       highlightTimerRef.current = window.setTimeout(() => onHighlightPitch(null), 850);
     }
     setStageADemos((count) => count + 1);
-    if (module === "ear") onStatus("The matching pitch-class keys are marked on the piano.");
+    if (module === "ear") onStatus("The exact played key is marked; the main pitch appears most often.");
     if (session.index < session.questions.length - 1) {
       onChange({ ...course, activeSession: { ...session, index: session.index + 1 } });
     }
@@ -474,17 +593,27 @@ export default function PitchTraining({
   }
 
   function replay() {
-    if (!session || !question || !sessionAllowsReplay(session)) return;
-    if (!onPlayTone(question.midi, question.timbre, 0.8)) {
-      submitResponse(responseForDeviceError(session, question));
+    if (module !== "ear") return;
+    if (!session || !question || (course.timed && !sessionAllowsReplay(session))) return;
+    if (!onPlayTone(question.midi, currentTimbre, 0.8)) {
+      submitResponse(responseForDeviceError(session, question, currentTimbre));
       return;
     }
     onChange({ ...course, activeSession: { ...session, replayUsed: true } });
   }
 
+  function replayFeedback() {
+    if (module !== "ear") return;
+    if (!session || !question || !feedback) return;
+    if (!onPlayTone(question.midi, currentTimbre, 0.8)) {
+      onStatus("Audio output is unavailable");
+    }
+  }
+
   function retrySight() {
     if (!session || (!feedback?.deviceError && !sessionAllowsRetry(session))) return;
     setFeedback(null);
+    setSightRecording(null);
     answeringRef.current = false;
     onChange({
       ...course,
@@ -500,9 +629,25 @@ export default function PitchTraining({
   function exitSession() {
     stopMicrophone();
     setFeedback(null);
+    setSightRecording(null);
     answeringRef.current = false;
     updateCourse({ activeSession: null });
     onStatus(formal ? "Formal session exited without a result" : "Session paused and closed");
+  }
+
+  function recordSightAgain() {
+    if (module !== "sight" || !session || !question || feedback) return;
+    stopMicrophone();
+    setSightRecording(null);
+    setMicrophoneState("idle");
+    setMicrophoneMessage("Listening for a new recording…");
+    void startMicrophone("answer");
+  }
+
+  function finishSightRecording() {
+    if (module !== "sight" || !session || !question || feedback) return;
+    stopMicrophone();
+    submitSightRecording(false);
   }
 
   function exportData(format: "csv" | "json") {
@@ -517,6 +662,59 @@ export default function PitchTraining({
     URL.revokeObjectURL(link.href);
   }
 
+  if (module === "sight" && !hasVocalRange) {
+    return (
+      <section className="pitch-module">
+        <PageHeading copy={copy} retained={0} view={view} onView={setView} showNavigation={false} />
+        <div className="pitch-onboarding">
+          <div>
+            <p className="eyebrow">Required first step</p>
+            <h2>Measure your comfortable vocal range</h2>
+            <p>Capture one comfortable low note and one comfortable high note. Every Sight Singing target will stay inside this range.</p>
+            <ul>
+              <li>Use a steady, unaccompanied vowel sound.</li>
+              <li>Do not force either end of your range.</li>
+              <li>The first range test cannot be skipped; it can be repeated later.</li>
+            </ul>
+          </div>
+          <div className="vocal-range-card">
+            <p className="eyebrow">Vocal range test</p>
+            <div className="vocal-range-steps">
+              <div className={rangeDraftLow !== null ? "complete" : vocalRangeStep === "low" ? "active" : ""}>
+                <span>01</span>
+                <strong>Lowest comfortable note</strong>
+                <small>{rangeDraftLow === null ? "Not captured" : midiLabel(rangeDraftLow)}</small>
+              </div>
+              <div className={vocalRangeStep === "high" ? "active" : ""}>
+                <span>02</span>
+                <strong>Highest comfortable note</strong>
+                <small>Captured after the low note</small>
+              </div>
+            </div>
+            <p className={`range-listening ${microphoneState}`}>{microphoneMessage}</p>
+            {vocalRangeStep === "high" ? (
+              <button
+                className="primary-button"
+                disabled={microphoneState === "requesting" || microphoneState === "listening"}
+                onClick={captureVocalRangeHigh}
+              >
+                {microphoneState === "requesting" || microphoneState === "listening" ? "Listening…" : "Capture highest note"}
+              </button>
+            ) : (
+              <button
+                className="primary-button"
+                disabled={vocalRangeStep === "low" && (microphoneState === "requesting" || microphoneState === "listening")}
+                onClick={beginVocalRangeTest}
+              >
+                {vocalRangeStep === "low" ? "Retry lowest note" : "Start vocal range test"}
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   if (session) {
     return (
       <TrainingSession
@@ -526,26 +724,32 @@ export default function PitchTraining({
         feedback={feedback}
         remainingMs={remainingMs}
         microphoneState={microphoneState}
+        sightRecording={sightRecording}
         stageADemos={stageADemos}
         extraDemos={extraDemos}
         onExit={exitSession}
         onReplay={replay}
+        onReplayFeedback={replayFeedback}
+        onRecordAgain={recordSightAgain}
+        onFinishRecording={finishSightRecording}
+        onNext={advanceAfterFeedback}
         onRetry={retrySight}
         onPlayDemo={playStageADemo}
         onPlayExtra={() => {
           if (!question || extraDemos >= 6) return;
-          if (!onPlayTone(question.midi, question.timbre, 0.8)) {
+          if (!onPlayTone(question.midi, currentTimbre, 0.8)) {
             onStatus("Audio output is unavailable");
             return;
           }
           if (module === "ear") {
-            onHighlightPitch(question.target);
+            onHighlightPitch(question.midi);
             if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
             highlightTimerRef.current = window.setTimeout(() => onHighlightPitch(null), 850);
           }
           setExtraDemos((count) => count + 1);
         }}
         onFinishStageA={finishStageA}
+        timed={course.timed}
       />
     );
   }
@@ -560,8 +764,10 @@ export default function PitchTraining({
             <h2>{module === "ear" ? "Identify without a visible clue" : "Sing without a reference tone"}</h2>
             <p>{copy.intro}</p>
             <ul>
-              <li>A4 is fixed at 440 Hz; questions span C3–B5.</li>
-              <li>{module === "ear" ? "The baseline has 108 balanced questions and cannot be replayed." : "The baseline has 36 balanced questions and does not play target notes."}</li>
+              <li>{module === "ear"
+                ? "A4 is fixed at 440 Hz; questions span C3–B5."
+                : `Targets stay inside your saved range: ${midiLabel(course.vocalRangeLowMidi as number)}–${midiLabel(course.vocalRangeHighMidi as number)}.`}</li>
+              <li>{module === "ear" ? "The baseline has 108 questions and may be skipped." : "The baseline has 36 questions and may be skipped."}</li>
               <li>Results are used only to select a sensible starting pitch.</li>
             </ul>
           </div>
@@ -583,14 +789,11 @@ export default function PitchTraining({
               <small>{course.volumeCheckCompleted ? "Complete" : "Plays non-pitched noise"}</small>
             </button>
             {module === "sight" && (
-              <button
-                className={course.microphoneCheckCompleted ? "completed" : ""}
-                onClick={() => void startMicrophone(true)}
-              >
+              <div className="vocal-range-summary">
                 <span>02</span>
-                <strong>Check microphone</strong>
-                <small>{microphoneMessage}</small>
-              </button>
+                <strong>Vocal range ready</strong>
+                <small>{midiLabel(course.vocalRangeLowMidi as number)}–{midiLabel(course.vocalRangeHighMidi as number)}</small>
+              </div>
             )}
             {module === "sight" && (
               <label className="pitch-select">
@@ -604,13 +807,26 @@ export default function PitchTraining({
                 </select>
               </label>
             )}
-            <button
-              className="primary-button"
-              disabled={!course.volumeCheckCompleted || (module === "sight" && !course.microphoneCheckCompleted)}
-              onClick={() => start("baseline")}
-            >
-              Start baseline
-            </button>
+            <div className="setup-option">
+              <span>Answer timing</span>
+              <div className="segmented" aria-label="Answer timing">
+                <button className={course.timed ? "active" : ""} onClick={() => updateCourse({ timed: true })}>Timed</button>
+                <button className={!course.timed ? "active" : ""} onClick={() => updateCourse({ timed: false })}>No limit</button>
+              </div>
+              {!course.timed && <small>{module === "ear"
+                ? "Target sounds can be replayed as often as needed."
+                : "Recordings can be repeated until you choose one to submit."}</small>}
+            </div>
+            <div className="baseline-actions">
+              <button
+                className="primary-button"
+                disabled={!course.volumeCheckCompleted || (module === "sight" && !hasVocalRange)}
+                onClick={() => start("baseline")}
+              >
+                Start baseline
+              </button>
+              <button disabled={module === "sight" && !hasVocalRange} onClick={skipBaseline}>Skip baseline</button>
+            </div>
           </div>
         </div>
       </section>
@@ -655,21 +871,48 @@ export default function PitchTraining({
       {view === "settings" && (
         <div className="pitch-settings">
           <div>
-            <p className="eyebrow">Representation</p>
-            <h2>Sight-reading display</h2>
-            <p>The selection is fixed when a session starts. Formal scores remain separated by representation.</p>
+            <p className="eyebrow">Timing</p>
+            <h2>Answer window</h2>
+            <p>{module === "ear"
+              ? "Timed mode uses an answer window; No limit allows repeated target playback."
+              : "Timed mode can be ended early; No limit allows repeated recording before submission."}</p>
           </div>
-          {module === "sight" ? (
+          <div className="segmented" aria-label="Answer timing">
+            <button className={course.timed ? "active" : ""} onClick={() => updateCourse({ timed: true })}>Timed</button>
+            <button className={!course.timed ? "active" : ""} onClick={() => updateCourse({ timed: false })}>No limit</button>
+          </div>
+          {module === "sight" && <>
+            <div>
+              <p className="eyebrow">Representation</p>
+              <h2>Sight-reading display</h2>
+              <p>The selection is fixed when a session starts.</p>
+            </div>
             <div className="segmented" aria-label="Sight-singing representation">
               <button className={course.representation === "note-name" ? "active" : ""} onClick={() => updateCourse({ representation: "note-name" })}>Note name</button>
               <button className={course.representation === "staff" ? "active" : ""} onClick={() => updateCourse({ representation: "staff" })}>Staff</button>
             </div>
-          ) : <p className="muted-copy">Ear-training answers always use the existing piano.</p>}
+          </>}
           {module === "sight" && (
-            <button className="pitch-device-button" onClick={() => void startMicrophone(true)}>
-              Recheck microphone
-              <small>{microphoneMessage}</small>
-            </button>
+            <div className="vocal-range-settings">
+              <span>Current vocal range</span>
+              <strong>{midiLabel(course.vocalRangeLowMidi as number)}–{midiLabel(course.vocalRangeHighMidi as number)}</strong>
+              <small>{vocalRangeStep === "high" ? microphoneMessage : "Retesting replaces the saved range after both notes are captured."}</small>
+              {vocalRangeStep === "high" ? (
+                <button
+                  disabled={microphoneState === "requesting" || microphoneState === "listening"}
+                  onClick={captureVocalRangeHigh}
+                >
+                  {microphoneState === "requesting" || microphoneState === "listening" ? "Listening…" : "Capture highest note"}
+                </button>
+              ) : (
+                <button
+                  disabled={vocalRangeStep === "low" && (microphoneState === "requesting" || microphoneState === "listening")}
+                  onClick={beginVocalRangeTest}
+                >
+                  {vocalRangeStep === "low" ? "Retry lowest note" : "Retest vocal range"}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -717,46 +960,80 @@ function CourseDashboard({
   module: PitchModule;
   course: PitchCourseState;
   masking: boolean;
-  onStart: (kind: PitchSessionKind) => void;
+  onStart: (kind: PitchSessionKind, practicePitch?: PitchName) => void;
 }) {
   const recentCertification = [...course.sessions].reverse().find((session) => session.kind === "certification");
-  const current = course.currentPitch ?? "F";
+  const current = course.currentPitch ?? PITCH_NAMES[0];
   const dueWeekly = weeklyIsDue(course);
   const certificationAvailable = canStartCertification(course);
   const retentionAvailable = retentionIsAvailable(course);
   const retentionTime = course.pendingRetentionAt ? new Date(course.pendingRetentionAt) : null;
   const stageKind: PitchSessionKind = course.stage === "A" ? "stage-a" : "training";
+  const fullKeyboard = module === "ear" && course.earFullKeyboardUnlocked;
+  const completedKeys = fullKeyboard ? completedEarMidiNotes(course).length : 0;
+  const practiceOptions = [...PITCH_NAMES];
+  const [waitingPracticePitch, setWaitingPracticePitch] = useState<PitchName>(
+    course.currentPitch ?? practiceOptions[0],
+  );
+  const selectedPracticePitch = practiceOptions.includes(waitingPracticePitch)
+    ? waitingPracticePitch
+    : practiceOptions[0];
 
   return (
     <div className="pitch-dashboard">
       <article className="pitch-current">
         <div>
           <p className="eyebrow">Current course point</p>
-          <h2>{STAGE_NAMES[course.stage]}</h2>
-          <p>
-            Working pitch <strong>{current}</strong> · {course.learnedPitches.length} learned · {course.retainedPitches.length} retained
-          </p>
+          <h2>{fullKeyboard && course.stage === "C" ? "88-key expansion" : STAGE_NAMES[course.stage]}</h2>
+          <p>{fullKeyboard
+            ? `${completedKeys}/88 piano keys completed · incomplete keys are prioritised`
+            : <>Working pitch <strong>{current}</strong> · {course.learnedPitches.length} learned · {course.retainedPitches.length} retained</>}</p>
         </div>
         <div className="pitch-stage-mark" aria-label={`Stage ${course.stage}`}>{course.stage}</div>
       </article>
       <div className="pitch-metrics">
-        <article><span>Retained</span><strong>{course.retainedPitches.length}/12</strong><small>{course.retainedPitches.join(" · ") || "Course just started"}</small></article>
+        <article><span>{fullKeyboard ? "Keyboard coverage" : "Retained"}</span><strong>{fullKeyboard ? `${completedKeys}/88` : `${course.retainedPitches.length}/12`}</strong><small>{fullKeyboard ? `${88 - completedKeys} keys remaining` : course.retainedPitches.join(" · ") || "Course just started"}</small></article>
         <article><span>Recent certification</span><strong>{recentCertification ? percent(recentCertification.accuracy) : "—"}</strong><small>{recentCertification ? new Date(recentCertification.completedAt).toLocaleDateString() : "No formal result yet"}</small></article>
         <article><span>{module === "ear" ? "Median response" : "Valid singing"}</span><strong>{recentCertification ? module === "ear" ? `${(recentCertification.medianResponseMs / 1000).toFixed(2)}s` : percent(recentCertification.validRate) : "—"}</strong><small>Formal sessions only</small></article>
       </div>
+      {fullKeyboard && (
+        <div className="keyboard-coverage" aria-label={`${completedKeys} of 88 piano keys completed`}>
+          <div><span>88-key completion</span><strong>{completedKeys}/88</strong></div>
+          <div className="keyboard-coverage-track"><i style={{ width: `${completedKeys / 88 * 100}%` }} /></div>
+          <small>A0–C8 · each key completes after one correct unassisted answer</small>
+        </div>
+      )}
       <div className="pitch-actions">
         <article>
           <p className="eyebrow">Recommended next</p>
-          <h3>{course.stage === "F" ? "Overnight check" : STAGE_NAMES[course.stage]}</h3>
-          <p>{stageDescription(module, course.stage)}</p>
+          <h3>{fullKeyboard && course.stage === "C" ? "Complete every piano key" : course.stage === "F" ? "Overnight check" : STAGE_NAMES[course.stage]}</h3>
+          <p>{fullKeyboard && course.stage === "C"
+            ? "Training blocks prioritise keys that have not yet received a correct unassisted answer."
+            : stageDescription(module, course.stage)}</p>
           {course.stage === "E" ? (
             <button className="primary-button" disabled={!certificationAvailable || masking} onClick={() => onStart("certification")}>
               {masking ? "Masking sound · test starts shortly" : certificationAvailable ? "Start certification" : "Daily certification limit reached"}
             </button>
           ) : course.stage === "F" ? (
-            <button className="primary-button" disabled={!retentionAvailable || masking} onClick={() => onStart("retention")}>
-              {masking ? "Masking sound · test starts shortly" : retentionAvailable ? "Start retention test" : `Available ${retentionTime?.toLocaleString() ?? "after 12 hours"}`}
-            </button>
+            <div className="overnight-actions">
+              <button className="primary-button" disabled={!retentionAvailable || masking} onClick={() => onStart("retention")}>
+                {masking ? "Masking sound · test starts shortly" : retentionAvailable ? "Start retention test" : `Available ${retentionTime?.toLocaleString() ?? "after 12 hours"}`}
+              </button>
+              {!retentionAvailable && (
+                <>
+                  <label>
+                    <span>Practice focus</span>
+                    <select
+                      value={selectedPracticePitch}
+                      onChange={(event) => setWaitingPracticePitch(event.target.value as PitchName)}
+                    >
+                      {practiceOptions.map((pitch) => <option key={pitch} value={pitch}>{pitch}</option>)}
+                    </select>
+                  </label>
+                  <button onClick={() => onStart("training", selectedPracticePitch)}>Practice while waiting</button>
+                </>
+              )}
+            </div>
           ) : (
             <button className="primary-button" onClick={() => onStart(stageKind)}>
               {course.stage === "A" ? "Start association" : "Start training block"}
@@ -766,7 +1043,11 @@ function CourseDashboard({
         <article>
           <p className="eyebrow">Weekly calibration</p>
           <h3>{dueWeekly ? "Weekly test is ready" : "Not due yet"}</h3>
-          <p>{module === "ear" ? "108 balanced questions across three octaves and three timbres." : "36 balanced questions across twelve pitch names."}</p>
+          <p>{module === "ear"
+            ? fullKeyboard
+              ? "88 questions covering A0–C8, with one question for every piano key."
+              : "108 questions across the middle three octaves using the currently selected piano sound."
+            : "36 balanced questions across twelve pitch names."}</p>
           <button disabled={!dueWeekly} onClick={() => onStart("weekly")}>Start weekly test</button>
         </article>
       </div>
@@ -787,14 +1068,20 @@ function TrainingSession({
   feedback,
   remainingMs,
   microphoneState,
+  sightRecording,
   stageADemos,
   extraDemos,
   onExit,
   onReplay,
+  onReplayFeedback,
+  onRecordAgain,
+  onFinishRecording,
+  onNext,
   onRetry,
   onPlayDemo,
   onPlayExtra,
   onFinishStageA,
+  timed,
 }: {
   module: PitchModule;
   session: PitchSession;
@@ -802,14 +1089,20 @@ function TrainingSession({
   feedback: Feedback | null;
   remainingMs: number;
   microphoneState: MicrophoneState;
+  sightRecording: SightRecording;
   stageADemos: number;
   extraDemos: number;
   onExit: () => void;
   onReplay: () => void;
+  onReplayFeedback: () => void;
+  onRecordAgain: () => void;
+  onFinishRecording: () => void;
+  onNext: () => void;
   onRetry: () => void;
   onPlayDemo: () => void;
   onPlayExtra: () => void;
   onFinishStageA: () => void;
+  timed: boolean;
 }) {
   if (!question) return null;
   const formal = isFormalSession(session.kind);
@@ -835,7 +1128,7 @@ function TrainingSession({
               ? <div className="sight-note-name">{question.target}{question.octave}</div>
               : <StaffNote midi={question.midi} pitch={question.target} />
           )}
-          {module === "ear" && <div className="sound-orbit" aria-label="Sound demonstration"><i /><span>Listen, then notice every matching key</span></div>}
+          {module === "ear" && <div className="sound-orbit" aria-label="Sound demonstration"><i /><span>Main pitch weighted · nearby seconds mixed in</span></div>}
           <button className="primary-button" disabled={stageADemos >= 6} onClick={onPlayDemo}>Play demonstration {Math.min(stageADemos + 1, 6)}</button>
           {stageADemos >= 6 && (
             <div className="practice-buttons">
@@ -852,19 +1145,21 @@ function TrainingSession({
     <section className="pitch-module pitch-session-page">
       <div className="pitch-session-top">
         <button onClick={onExit}>← Back</button>
-        <div><p className="eyebrow">{formal ? "Formal session · no live score" : `${module === "ear" ? "Ear training" : "Sight singing"} · Stage ${session.stage}`}</p><h1>{title}</h1></div>
+        <div><p className="eyebrow">{formal ? `${module === "ear" ? "Ear training" : "Sight singing"} · feedback after each answer` : `${module === "ear" ? "Ear training" : "Sight singing"} · Stage ${session.stage}`}</p><h1>{title}</h1></div>
         <span>{session.index + 1} / {session.questions.length}</span>
       </div>
       <div className="pitch-progress"><i style={{ width: `${progress * 100}%` }} /></div>
       <div className={`pitch-question ${module}`}>
         <div className="pitch-question-meta">
           <span>{module === "ear" ? "Sound" : "Target"}</span>
-          <strong>{(remainingMs / 1000).toFixed(1)}s</strong>
+          <strong>{timed ? `${(remainingMs / 1000).toFixed(1)}s` : "No limit"}</strong>
         </div>
         {module === "ear" ? (
           <div className="ear-prompt">
             <div className="sound-orbit"><i /><span>Sound played · choose one piano key</span></div>
-            {sessionAllowsReplay(session) && <button onClick={onReplay}>Replay once · marks this answer assisted</button>}
+            {!feedback && (!timed || sessionAllowsReplay(session)) && (
+              <button onClick={onReplay}>{timed ? "Replay once · marks this answer assisted" : "Replay sound"}</button>
+            )}
           </div>
         ) : (
           <div className="sight-prompt">
@@ -873,20 +1168,42 @@ function TrainingSession({
               : <StaffNote midi={question.midi} pitch={question.target} />}
             <div className={`recording-state ${microphoneState}`}>
               <i />
-              <span>{microphoneState === "requesting" ? "Preparing microphone" : microphoneState === "stable" ? "Stable note received" : "Listening for one stable note"}</span>
+              <span>{microphoneState === "requesting" ? "Preparing microphone" : sightRecording ? "Stable recording captured" : "Listening for one stable note"}</span>
             </div>
+            {!feedback && (
+              <div className="recording-actions">
+                {timed ? (
+                  <button
+                    className="primary-button"
+                    disabled={microphoneState === "idle" || microphoneState === "requesting"}
+                    onClick={onFinishRecording}
+                  >
+                    End recording
+                  </button>
+                ) : sightRecording ? (
+                  <>
+                    <button onClick={onRecordAgain}>Record again</button>
+                    <button className="primary-button" onClick={onFinishRecording}>Use recording</button>
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
         )}
-        {feedback && (!formal || feedback.deviceError) && (
+        {feedback && (
           <div className={`pitch-feedback ${feedback.correct ? "correct" : "wrong"}`} role="status">
-            <strong>{feedback.batchAccuracy !== undefined ? "Six-question checkpoint" : feedback.deviceError ? "Audio device interrupted" : feedback.correct ? "Correct pitch name" : feedback.answer === "No stable note" ? "No stable single note" : "Try that pitch again"}</strong>
+            <strong>{feedback.batchAccuracy !== undefined ? "Six-question checkpoint" : feedback.deviceError ? "Audio device interrupted" : feedback.correct ? "Correct pitch" : feedback.answer === "No stable note" ? "No stable single note" : "Try that pitch again"}</strong>
             <span>{feedback.batchAccuracy !== undefined ? `${percent(feedback.batchAccuracy)} in this block · individual answers remain hidden` : feedback.deviceError ? "This question is excluded and can be attempted again." : `Target ${feedback.target} · received ${feedback.answer}${feedback.direction ? ` · ${feedback.direction}` : ""}`}</span>
-            {feedback.retryAvailable && <button onClick={onRetry}>{feedback.deviceError ? "Reconnect and retry question" : "Listen once and retry · assisted"}</button>}
+            <div className="pitch-feedback-actions">
+              {module === "ear" && !feedback.deviceError && <button onClick={onReplayFeedback}>Replay sound</button>}
+              {feedback.retryAvailable && <button onClick={onRetry}>{feedback.deviceError ? "Reconnect and retry question" : module === "ear" ? "Listen once and retry · assisted" : "Record again · assisted"}</button>}
+              {!feedback.deviceError && <button className="primary-button" onClick={onNext}>Next</button>}
+            </div>
           </div>
         )}
       </div>
       <p className="pitch-session-note">
-        {formal ? "Answers and accuracy remain hidden until the block is complete." : module === "ear" ? "Any octave of the same pitch name is accepted." : "A different octave of the same pitch name is accepted and recorded separately."}
+        {module === "ear" ? "Select the exact piano key, including the correct octave." : "Sing the exact displayed pitch inside your saved vocal range."}
       </p>
     </section>
   );
@@ -993,7 +1310,11 @@ function StaffNote({ midi, pitch }: { midi: number; pitch: string }) {
   );
 }
 
-function responseForTimeout(session: PitchSession, question: PitchSession["questions"][number]): PitchResponse {
+function responseForTimeout(
+  session: PitchSession,
+  question: PitchSession["questions"][number],
+  timbre: TrainingTimbre,
+): PitchResponse {
   return {
     id: crypto.randomUUID(),
     sessionId: session.id,
@@ -1002,7 +1323,7 @@ function responseForTimeout(session: PitchSession, question: PitchSession["quest
     stage: session.stage,
     target: question.target,
     octave: question.octave,
-    timbre: question.timbre,
+    timbre,
     representation: session.representation,
     valid: false,
     correct: false,
@@ -1015,7 +1336,11 @@ function responseForTimeout(session: PitchSession, question: PitchSession["quest
   };
 }
 
-function responseForDeviceError(session: PitchSession, question: PitchSession["questions"][number]): PitchResponse {
+function responseForDeviceError(
+  session: PitchSession,
+  question: PitchSession["questions"][number],
+  timbre: TrainingTimbre,
+): PitchResponse {
   return {
     id: crypto.randomUUID(),
     sessionId: session.id,
@@ -1024,7 +1349,7 @@ function responseForDeviceError(session: PitchSession, question: PitchSession["q
     stage: session.stage,
     target: question.target,
     octave: question.octave,
-    timbre: question.timbre,
+    timbre,
     representation: session.representation,
     valid: false,
     correct: false,
@@ -1037,12 +1362,16 @@ function responseForDeviceError(session: PitchSession, question: PitchSession["q
   };
 }
 
+function midiLabel(midi: number): string {
+  return `${pitchNameForMidi(midi)}${Math.floor(midi / 12) - 1}`;
+}
+
 function stageDescription(module: PitchModule, stage: PitchCourseState["stage"]): string {
-  if (stage === "A") return module === "ear" ? "Hear the new pitch name across three octaves and connect it to every matching piano key." : "Connect the visual target, standard sound, and your singing action.";
-  if (stage === "B") return module === "ear" ? "Separate the new pitch from nearby distractors with immediate feedback." : "Hear the target once, then reproduce it with immediate feedback.";
-  if (stage === "C") return "Recall all learned pitch names with guidance and one assisted second attempt.";
-  if (stage === "D") return "Build faster, stable responses without per-question cues.";
-  if (stage === "E") return "Complete a balanced, no-feedback formal certification.";
+  if (stage === "A") return module === "ear" ? "Hear the main pitch most often while nearby seconds are mixed across three octaves." : "Connect the visual target, standard sound, and your singing action.";
+  if (stage === "B") return module === "ear" ? "Add the new pitch to a cumulative mix of every pitch already learned." : "Hear the target once, then reproduce it with immediate feedback.";
+  if (stage === "C") return "Recall all learned pitches with guidance and one assisted second attempt.";
+  if (stage === "D") return "Build faster, stable responses with feedback after every answer.";
+  if (stage === "E") return "Complete a formal mixed certification with the current pitch weighted and feedback before each Next step.";
   if (stage === "F") return "Confirm the pitch remains stable at least twelve hours later.";
   return "Complete the baseline to establish an individual starting point.";
 }
