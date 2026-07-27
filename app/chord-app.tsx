@@ -15,8 +15,27 @@ import {
   type AccidentalPreference,
   type Chord,
 } from "@/lib/music";
+import PitchTraining from "@/app/pitch-training";
+import {
+  DEFAULT_PITCH_TRAINING_STATE,
+  normalizePitchTrainingState,
+  pitchNameForMidi,
+  type PitchCourseState,
+  type PitchName,
+  type PitchTrainingState,
+  type TrainingTimbre,
+} from "@/lib/pitch-training";
 
-type Page = "Library" | "Chord" | "Favorites" | "Builder" | "Practice" | "Progressions" | "Settings";
+type Page =
+  | "Library"
+  | "Chord"
+  | "Favorites"
+  | "Builder"
+  | "Practice"
+  | "Ear Training"
+  | "Sight Singing"
+  | "Progressions"
+  | "Settings";
 type ChordView = "In Scale" | "Neighbor Keys";
 type PracticeMode = "Chord Learning" | "Exact Voicing" | "Hear";
 type PracticeSource = "scale" | "favorites";
@@ -83,6 +102,7 @@ type PersistedState = {
   mode: string;
   instrument: Instrument;
   pianoCollapsed: boolean;
+  pitchTraining: PitchTrainingState;
 };
 
 const DEFAULT_STATE: PersistedState = {
@@ -95,6 +115,7 @@ const DEFAULT_STATE: PersistedState = {
   mode: "Major",
   instrument: "Piano",
   pianoCollapsed: false,
+  pitchTraining: DEFAULT_PITCH_TRAINING_STATE,
 };
 
 const INSTRUMENTS: Instrument[] = ["Piano", "Electric Piano", "Organ"];
@@ -105,8 +126,10 @@ const NAV_ITEMS: Array<{ page: Page; key: string }> = [
   { page: "Favorites", key: "03" },
   { page: "Builder", key: "04" },
   { page: "Practice", key: "05" },
-  { page: "Progressions", key: "06" },
-  { page: "Settings", key: "07" },
+  { page: "Ear Training", key: "06" },
+  { page: "Sight Singing", key: "07" },
+  { page: "Progressions", key: "08" },
+  { page: "Settings", key: "09" },
 ];
 
 const DEGREE_ORDER = ["I", "II", "III", "IV", "V", "VI", "VII"];
@@ -270,12 +293,17 @@ function scheduleNotes(
 
 function playNotes(notes: number[], duration = 1.5, instrument: Instrument = "Piano") {
   const AudioContextClass = window.AudioContext ?? window.webkitAudioContext;
-  if (!AudioContextClass) return;
-  const context = new AudioContextClass();
-  const master = context.createGain();
-  master.connect(context.destination);
-  scheduleNotes(context, master, notes, context.currentTime, duration, instrument);
-  window.setTimeout(() => void context.close(), (duration + 0.2) * 1000);
+  if (!AudioContextClass) return false;
+  try {
+    const context = new AudioContextClass();
+    const master = context.createGain();
+    master.connect(context.destination);
+    scheduleNotes(context, master, notes, context.currentTime, duration, instrument);
+    window.setTimeout(() => void context.close(), (duration + 0.2) * 1000);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 type ProgressionPlayback = {
@@ -388,6 +416,8 @@ export default function ChordApp() {
   const [selectedChord, setSelectedChord] = useState<Chord | null>(null);
   const [activeNotes, setActiveNotes] = useState<number[]>([]);
   const [selectedNotes, setSelectedNotes] = useState<number[]>([]);
+  const [pitchPianoAnswer, setPitchPianoAnswer] = useState<{ note: number; id: number } | null>(null);
+  const [pitchKeyHighlight, setPitchKeyHighlight] = useState<PitchName | null>(null);
   const [status, setStatus] = useState("Ready");
   const [bpm, setBpm] = useState(120);
   const [loop, setLoop] = useState(false);
@@ -414,6 +444,7 @@ export default function ChordApp() {
   const midiSustainedNotesRef = useRef(new Set<number>());
   const midiSustainRef = useRef(false);
   const instrumentRef = useRef<Instrument>(DEFAULT_STATE.instrument);
+  const earAnsweringRef = useRef(false);
   const loopRef = useRef(loop);
   const saveFileRef = useRef<HTMLInputElement>(null);
 
@@ -447,7 +478,11 @@ export default function ChordApp() {
       })
       .then((data) => {
         if (!active) return;
-        setStored({ ...DEFAULT_STATE, ...data });
+        setStored({
+          ...DEFAULT_STATE,
+          ...data,
+          pitchTraining: normalizePitchTrainingState(data?.pitchTraining),
+        });
         setHydrated(true);
       })
       .catch(() => {
@@ -464,6 +499,11 @@ export default function ChordApp() {
   useEffect(() => {
     instrumentRef.current = stored.instrument;
   }, [stored.instrument]);
+
+  useEffect(() => {
+    const earSession = stored.pitchTraining.ear.activeSession;
+    earAnsweringRef.current = page === "Ear Training" && Boolean(earSession && earSession.stage !== "A");
+  }, [page, stored.pitchTraining.ear.activeSession]);
 
   useEffect(() => {
     loopRef.current = loop;
@@ -531,6 +571,42 @@ export default function ChordApp() {
   const updateStored = useCallback((patch: Partial<PersistedState>) => {
     setStored((current) => ({ ...current, ...patch }));
   }, []);
+
+  const updatePitchCourse = useCallback((module: "ear" | "sight", course: PitchCourseState) => {
+    setStored((current) => ({
+      ...current,
+      pitchTraining: {
+        ...current.pitchTraining,
+        [module]: course,
+      },
+    }));
+  }, []);
+
+  const playPitchTone = useCallback((note: number, timbre: TrainingTimbre, duration: number) => {
+    return playNotes([note], duration, timbre);
+  }, []);
+
+  const navigateToPage = useCallback((nextPage: Page) => {
+    if (nextPage !== page && (page === "Ear Training" || page === "Sight Singing")) {
+      const courseKey = page === "Ear Training" ? "ear" : "sight";
+      setStored((current) => ({
+        ...current,
+        pitchTraining: {
+          ...current.pitchTraining,
+          [courseKey]: {
+            ...current.pitchTraining[courseKey],
+            activeSession: null,
+          },
+        },
+      }));
+    }
+    if (nextPage === "Ear Training") {
+      setSelectedNotes([]);
+      setActiveNotes([]);
+    }
+    if (nextPage !== "Ear Training") setPitchKeyHighlight(null);
+    setPage(nextPage);
+  }, [page]);
 
   function finishAuthentication(user: AuthUser) {
     setAuthUser(user);
@@ -785,6 +861,10 @@ export default function ChordApp() {
         }
 
         if (isNoteOn) {
+          if (earAnsweringRef.current) {
+            setPitchPianoAnswer((current) => ({ note: data1, id: (current?.id ?? 0) + 1 }));
+            return;
+          }
           midiVoicesRef.current.get(data1)?.stop();
           midiVoicesRef.current.set(
             data1,
@@ -1404,26 +1484,26 @@ export default function ChordApp() {
   }
 
   return (
-    <div className={`app-shell ${stored.pianoCollapsed ? "piano-collapsed" : ""}`}>
+    <div className={`app-shell ${stored.pianoCollapsed && page !== "Ear Training" ? "piano-collapsed" : ""} ${page === "Sight Singing" ? "piano-hidden" : ""}`}>
       <div className="desktop-notice">
         <span>Chorda</span>
         <h1>Desktop viewport required</h1>
       </div>
       <header className="topbar">
-        <button className="wordmark" onClick={() => setPage("Library")}>Chorda</button>
+        <button className="wordmark" onClick={() => navigateToPage("Library")}>Chorda</button>
         <div className="global-controls">
           <label><span>Key</span><select value={stored.key} onChange={(event) => updateStored({ key: event.target.value })}>{ROOT_OPTIONS.map((root) => <option key={root}>{root}</option>)}</select></label>
           <label><span>Scale / Mode</span><select value={stored.mode} onChange={(event) => updateStored({ mode: event.target.value })}>{Object.keys(MODE_INTERVALS).map((mode) => <option key={mode}>{mode}</option>)}</select></label>
           <label><span>Chord View</span><select value={view} onChange={(event) => setView(event.target.value as ChordView)}><option>In Scale</option><option>Neighbor Keys</option></select></label>
         </div>
         <button className="midi-pill" onClick={connectMidi}><i /> MIDI · {midiState === "Not connected" ? "OFF" : "ON"}</button>
-        <button className="user-menu" onClick={() => setPage("Settings")}>{authUser?.username.slice(0, 2).toUpperCase()} <span>{authUser?.username}</span></button>
+        <button className="user-menu" onClick={() => navigateToPage("Settings")}>{authUser?.username.slice(0, 2).toUpperCase()} <span>{authUser?.username}</span></button>
       </header>
 
       <aside className="sidebar">
         <nav aria-label="Primary navigation">
           {NAV_ITEMS.map((item) => (
-            <button key={item.page} className={page === item.page ? "active" : ""} onClick={() => setPage(item.page)}>
+            <button key={item.page} className={page === item.page ? "active" : ""} onClick={() => navigateToPage(item.page)}>
               <span>{item.key}</span>{item.page}
               {item.page === "Builder" && stored.builder.length > 0 && <b>{stored.builder.length}</b>}
             </button>
@@ -1442,15 +1522,46 @@ export default function ChordApp() {
         {page === "Favorites" && renderFavorites()}
         {page === "Builder" && renderBuilder()}
         {page === "Practice" && renderPractice()}
+        {page === "Ear Training" && (
+          <PitchTraining
+            module="ear"
+            course={stored.pitchTraining.ear}
+            pianoAnswer={pitchPianoAnswer}
+            onChange={(course) => updatePitchCourse("ear", course)}
+            onPlayTone={playPitchTone}
+            onHighlightPitch={setPitchKeyHighlight}
+            onStatus={setStatus}
+          />
+        )}
+        {page === "Sight Singing" && (
+          <PitchTraining
+            module="sight"
+            course={stored.pitchTraining.sight}
+            pianoAnswer={null}
+            onChange={(course) => updatePitchCourse("sight", course)}
+            onPlayTone={playPitchTone}
+            onHighlightPitch={setPitchKeyHighlight}
+            onStatus={setStatus}
+          />
+        )}
         {page === "Progressions" && renderProgressions()}
         {page === "Settings" && renderSettings()}
       </main>
 
-      <section className="piano-dock" aria-label="On-screen piano">
+      {page !== "Sight Singing" && <section className="piano-dock" aria-label="On-screen piano">
         <div className="piano-toolbar">
-          <div><span>On-screen Piano</span><small>{selectedNotes.length ? selectedNotes.map((note) => midiNoteName(note, stored.preference)).join(" · ") : "Select notes or play a chord"}</small></div>
-          <div className="legend"><span><i className="target" /> Target</span><span><i className="pressed" /> Selected</span><span><i className="active" /> Playing</span></div>
-          <div className="instrument-picker">
+          <div>
+            <span>On-screen Piano</span>
+            <small>
+              {page === "Ear Training"
+                ? "Choose any octave of the pitch name you heard"
+                : selectedNotes.length
+                  ? selectedNotes.map((note) => midiNoteName(note, stored.preference)).join(" · ")
+                  : "Select notes or play a chord"}
+            </small>
+          </div>
+          {page !== "Ear Training" && <div className="legend"><span><i className="target" /> Target</span><span><i className="pressed" /> Selected</span><span><i className="active" /> Playing</span></div>}
+          {page !== "Ear Training" && <div className="instrument-picker">
             <button
               aria-haspopup="menu"
               aria-expanded={instrumentMenuOpen}
@@ -1477,18 +1588,20 @@ export default function ChordApp() {
                 ))}
               </div>
             )}
-          </div>
-          <button disabled={!selectedNotes.length} onClick={addPianoSelectionToBuilder}>＋ Builder</button>
-          <button onClick={() => setSelectedNotes([])}>Clear</button>
-          <button onClick={() => selectedNotes.length && playNotes(selectedNotes, 1.5, stored.instrument)}>Play Selection</button>
-          <button onClick={() => updateStored({ pianoCollapsed: !stored.pianoCollapsed })}>{stored.pianoCollapsed ? "Expand" : "Collapse"}</button>
+          </div>}
+          {page !== "Ear Training" && <button disabled={!selectedNotes.length} onClick={addPianoSelectionToBuilder}>＋ Builder</button>}
+          {page !== "Ear Training" && <button onClick={() => setSelectedNotes([])}>Clear</button>}
+          {page !== "Ear Training" && <button onClick={() => selectedNotes.length && playNotes(selectedNotes, 1.5, stored.instrument)}>Play Selection</button>}
+          {page !== "Ear Training" && <button onClick={() => updateStored({ pianoCollapsed: !stored.pianoCollapsed })}>{stored.pianoCollapsed ? "Expand" : "Collapse"}</button>}
         </div>
-        {!stored.pianoCollapsed && (
+        {(!stored.pianoCollapsed || page === "Ear Training") && (
           <div className="piano-scroll">
             <div className="piano">
               {Array.from({ length: 88 }, (_, index) => index + 21).map((note) => {
                 const black = [1, 3, 6, 8, 10].includes(note % 12);
-                const isTarget = page === "Practice" && hints && currentPracticeTarget?.notes.includes(note);
+                const earSession = stored.pitchTraining.ear.activeSession;
+                const isTarget = (page === "Practice" && hints && currentPracticeTarget?.notes.includes(note))
+                  || (page === "Ear Training" && pitchKeyHighlight === pitchNameForMidi(note));
                 return (
                   <button
                     key={note}
@@ -1496,6 +1609,10 @@ export default function ChordApp() {
                     aria-label={midiNoteName(note, stored.preference)}
                     title={`${midiNoteName(note, stored.preference)} · MIDI ${note}`}
                     onClick={() => {
+                      if (page === "Ear Training" && earSession && earSession.stage !== "A") {
+                        setPitchPianoAnswer((current) => ({ note, id: (current?.id ?? 0) + 1 }));
+                        return;
+                      }
                       setSelectedNotes((notes) => notes.includes(note) ? notes.filter((value) => value !== note) : [...notes, note]);
                       playNotes([note], 0.7, stored.instrument);
                     }}
@@ -1507,7 +1624,7 @@ export default function ChordApp() {
             </div>
           </div>
         )}
-      </section>
+      </section>}
 
       <div className="status-bar" role="status">
         <span>{status}</span>

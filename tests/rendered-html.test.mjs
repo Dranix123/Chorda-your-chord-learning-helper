@@ -3,9 +3,10 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("builds the finished chord-learning product", async () => {
-  const [page, client, adminRoute, serverAuth] = await Promise.all([
+  const [page, client, pitchTraining, adminRoute, serverAuth] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chord-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/pitch-training.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/server-auth.ts", import.meta.url), "utf8"),
     access(new URL("../dist/server/index.js", import.meta.url)),
@@ -15,6 +16,13 @@ test("builds the finished chord-learning product", async () => {
   assert.match(product, /Chord Library/);
   assert.match(product, /Progression Builder/);
   assert.match(product, /Practice Mode/);
+  assert.match(client, /Ear Training/);
+  assert.match(client, /Sight Singing/);
+  assert.match(pitchTraining, /Single-note Ear Training/);
+  assert.match(pitchTraining, /Single-note Sight Singing/);
+  assert.match(pitchTraining, /StaffNote/);
+  assert.match(pitchTraining, /getUserMedia/);
+  assert.match(pitchTraining, /Export CSV/);
   assert.match(product, /On-screen Piano/);
   assert.match(product, /Create the first local account/);
   assert.match(product, /Show All/);
