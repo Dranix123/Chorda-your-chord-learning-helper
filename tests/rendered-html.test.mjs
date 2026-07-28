@@ -45,6 +45,7 @@ test("builds the finished chord-learning product", async () => {
   assert.match(pitchTraining, /onStart\("training", selectedPracticePitch\)/);
   assert.match(pitchTraining, /learnedPitches: course\.learnedPitches/);
   assert.match(client, /selectedTimbre=\{stored\.instrument\}/);
+  assert.match(client, /retryTimer = window\.setTimeout\(\(\) => void save\(\), 2_000\)/);
   assert.match(pitchTraining, /isPitchAnswerCorrect\(module,\s*pianoAnswer\.note,\s*question\.midi\)/);
   assert.match(client, /setActiveNotes\(\(notes\) => notes\.includes\(note\) \? notes : \[\.\.\.notes, note\]\)/);
   assert.match(client, /setActiveNotes\(\(notes\) => notes\.filter\(\(value\) => value !== note\)\)/);

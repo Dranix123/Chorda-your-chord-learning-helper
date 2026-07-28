@@ -156,14 +156,26 @@ function snapshotFor(chord: Chord, notes = chord.voicing, name = "System Default
 function useDebouncedStateSave(state: PersistedState, hydrated: boolean) {
   useEffect(() => {
     if (!hydrated) return;
-    const timer = window.setTimeout(() => {
-      void fetch("/api/state", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(state),
-      });
-    }, 500);
-    return () => window.clearTimeout(timer);
+    let cancelled = false;
+    let retryTimer: number | null = null;
+    const save = async () => {
+      try {
+        const response = await fetch("/api/state", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(state),
+        });
+        if (!response.ok && response.status >= 500) throw new Error("State save failed");
+      } catch {
+        if (!cancelled) retryTimer = window.setTimeout(() => void save(), 2_000);
+      }
+    };
+    const timer = window.setTimeout(() => void save(), 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
   }, [state, hydrated]);
 }
 

@@ -258,6 +258,22 @@ test("sight singing uses weighted second-neighbor confusion in learning and cert
   assert.ok(!lowerNeighborMidis.includes(midiForPitch("B", 2)));
   assert.ok(!lowerNeighborMidis.includes(midiForPitch("B", 5)));
 
+  const flatNeighbor = createPitchSession("sight", "training", {
+    ...lowerNeighborCourse,
+    learnedPitches: ["C", "B♭"],
+    vocalRangeHighMidi: midiForPitch("C", 6),
+  }, new Date(), seededRandom());
+  const flatNeighborMidis = [...new Set(
+    flatNeighbor.questions
+      .filter((question) => question.target === "B♭")
+      .map((question) => question.midi),
+  )];
+  assert.ok(flatNeighborMidis.length > 0);
+  assert.ok(flatNeighborMidis.every((midi) =>
+    [3, 4].some((octave) => midi === midiForPitch("B♭", octave)),
+  ));
+  assert.ok(!flatNeighborMidis.includes(midiForPitch("B♭", 5)));
+
   const certificationCourse = {
     ...associationCourse,
     stage: "E",

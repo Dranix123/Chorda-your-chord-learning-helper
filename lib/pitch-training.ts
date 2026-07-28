@@ -581,7 +581,12 @@ function weightedSightQuestions(
 ): PitchQuestion[] {
   const low = course.vocalRangeLowMidi ?? midiForPitch("C", 3);
   const high = course.vocalRangeHighMidi ?? midiForPitch("B", 5);
-  const anchors = midiNotesForPitch(current, low, high);
+  const middleRangeAnchors = OCTAVES
+    .map((octave) => midiForPitch(current, octave))
+    .filter((midi) => midi >= low && midi <= high);
+  const anchors = middleRangeAnchors.length
+    ? middleRangeAnchors
+    : midiNotesForPitch(current, low, high);
   return weightedAbsoluteQuestions(
     current,
     learned,
